@@ -1,0 +1,15 @@
+[
+  {
+    "question": "如何退货？",
+    "answer": "签收后7天内可申请退货，请保留原包装。",
+    "category": "退货政策",
+    "keywords": [
+      "退货",
+      "7天",
+      "原包装",
+      "签收"
+    ],
+    "source": "conversation_sess_001",
+    "confidence": 1.0
+  }
+]

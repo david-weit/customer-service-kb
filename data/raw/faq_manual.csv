@@ -1,0 +1,3 @@
+question,answer,category,keywords,source,confidence
+"如何退货？","7天无理由退货，质量问题15天内换货","退换货","退货,换货,售后","conversation_C001",0.95
+"发货时间多长？","24-48小时内发货","物流","发货,物流,配送","conversation_C002",0.90
