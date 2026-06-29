@@ -51,7 +51,7 @@ def main():
         faq_dicts = [faq.model_dump() for faq in unique_faqs]
         kb.add_faqs(faq_dicts)
 
-    print("\n🚀 启动RAG Agent...")
+    print("\n🚀 启动RAG Agent（已启用多查询检索）...")
     agent = create_rag_agent(llm, kb)
 
     print("\n💬 测试问答 (输入 'exit' 退出)")

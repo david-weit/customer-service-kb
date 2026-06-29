@@ -10,7 +10,7 @@
       "签收"
     ],
     "source": "conversation_sess_001",
-    "confidence": 1.0
+    "confidence": 0.95
   },
   {
     "question": "收货地址填错了如何修改？",
@@ -32,7 +32,7 @@
     "keywords": [
       "快递",
       "物流",
-      "查看物流",
+      "查看",
       "订单详情",
       "追踪"
     ],
@@ -64,6 +64,19 @@
     ],
     "source": "conversation_sess_011",
     "confidence": 0.95
+  },
+  {
+    "question": "运费如何计算？",
+    "answer": "订单满99元包邮，未满99元收取10元基础运费。",
+    "category": "配送与运费",
+    "keywords": [
+      "运费",
+      "包邮",
+      "满99元",
+      "基础运费"
+    ],
+    "source": "conversation_sess_013",
+    "confidence": 1.0
   },
   {
     "question": "可以指定快递公司吗？",
@@ -105,15 +118,16 @@
   },
   {
     "question": "如何评价已购买的商品？",
-    "answer": "确认收货后，进入订单详情页面，点击“评价”按钮即可进行晒单和评价。",
+    "answer": "确认收货后，进入订单详情页面，点击“评价”按钮即可进行晒单评价。",
     "category": "售后与评价",
     "keywords": [
       "评价",
+      "商品评价",
       "晒单",
       "订单详情",
       "确认收货"
     ],
     "source": "conversation_sess_020",
-    "confidence": 0.95
+    "confidence": 0.98
   }
 ]

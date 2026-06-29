@@ -1,5 +1,6 @@
 """RAG Agent 模块。"""
 
+from doctest import DocFileSuite
 from typing import Optional
 
 from langchain_core.documents import Document
@@ -7,7 +8,7 @@ from langchain_core.documents import Document
 import config
 from src.vector_store import KnowledgeBaseManager
 from .logger import logger
-
+from .query_expansion import QueryExpander
 
 class RAGAgent:
     """基于检索增强生成的客服问答 Agent。"""
@@ -22,10 +23,27 @@ class RAGAgent:
         self.kb = kb
         self.top_k = top_k or config.TOP_K
         logger.info("初始化 RAG Agent, model")
+        self.query_expander = QueryExpander(llm)
 
     def retrieve(self, question: str) -> list[Document]:
         """检索与问题相关的文档片段。"""
-        return self.kb.search(question, k=self.top_k)
+        #生成多个查询
+        expanded_queries = self.query_expander.expand_query(question)
+        print(f"Expanded queries: {expanded_queries}")
+        #对每个查询进行检索
+        all_doc = []
+        for q in expanded_queries:
+            docs = self.kb.search(q, self.top_k)
+            all_doc.extend(docs)
+
+        #去重复
+        seen_contents = set()
+        unique_docs = []
+        for doc in all_doc:
+            if doc.page_content not in seen_contents:
+                seen_contents.add(doc.page_content)
+                unique_docs.append(doc)
+        return unique_docs
 
     def build_prompt(self, question: str, docs: list[Document]) -> str:
         """构建 RAG 提示词。"""
