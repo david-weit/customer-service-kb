@@ -6,6 +6,7 @@ from langchain_core.documents import Document
 
 import config
 from src.vector_store import KnowledgeBaseManager
+from .logger import logger
 
 
 class RAGAgent:
@@ -20,6 +21,7 @@ class RAGAgent:
         self.llm = llm
         self.kb = kb
         self.top_k = top_k or config.TOP_K
+        logger.info("初始化 RAG Agent, model")
 
     def retrieve(self, question: str) -> list[Document]:
         """检索与问题相关的文档片段。"""

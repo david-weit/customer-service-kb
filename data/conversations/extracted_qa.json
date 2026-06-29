@@ -11,5 +11,109 @@
     ],
     "source": "conversation_sess_001",
     "confidence": 1.0
+  },
+  {
+    "question": "收货地址填错了如何修改？",
+    "answer": "订单未发货前可在APP订单详情页自行修改地址。",
+    "category": "订单管理",
+    "keywords": [
+      "收货地址",
+      "修改地址",
+      "订单未发货",
+      "APP操作"
+    ],
+    "source": "conversation_sess_003",
+    "confidence": 0.95
+  },
+  {
+    "question": "如何查看快递物流信息？",
+    "answer": "进入订单详情，点击【查看物流】即可追踪实时位置。",
+    "category": "物流查询",
+    "keywords": [
+      "快递",
+      "物流",
+      "查看物流",
+      "订单详情",
+      "追踪"
+    ],
+    "source": "conversation_sess_005",
+    "confidence": 0.95
+  },
+  {
+    "question": "可以开发票吗？",
+    "answer": "支持增值税普通发票和专用发票，下单时填写开票信息。",
+    "category": "发票与税务",
+    "keywords": [
+      "发票",
+      "增值税普通发票",
+      "增值税专用发票",
+      "开票信息"
+    ],
+    "source": "conversation_sess_008",
+    "confidence": 0.95
+  },
+  {
+    "question": "如何取消订单？",
+    "answer": "未支付订单可自行取消，已支付订单需申请退款。",
+    "category": "订单管理",
+    "keywords": [
+      "取消订单",
+      "未支付",
+      "已支付",
+      "退款"
+    ],
+    "source": "conversation_sess_011",
+    "confidence": 0.95
+  },
+  {
+    "question": "可以指定快递公司吗？",
+    "answer": "暂不支持指定快递，我们会为您选择最优配送服务。",
+    "category": "物流配送",
+    "keywords": [
+      "指定快递",
+      "快递公司",
+      "配送服务"
+    ],
+    "source": "conversation_sess_015",
+    "confidence": 1.0
+  },
+  {
+    "question": "海外能否购买商品？",
+    "answer": "支持全球配送，具体运费可在结算页面查询。",
+    "category": "配送与物流",
+    "keywords": [
+      "海外",
+      "全球配送",
+      "运费",
+      "结算页面"
+    ],
+    "source": "conversation_sess_016",
+    "confidence": 0.95
+  },
+  {
+    "question": "如何激活会员卡？",
+    "answer": "登录APP进入会员中心，点击激活按钮即可。",
+    "category": "会员服务",
+    "keywords": [
+      "激活",
+      "会员卡",
+      "APP",
+      "会员中心"
+    ],
+    "source": "conversation_sess_017",
+    "confidence": 0.95
+  },
+  {
+    "question": "如何评价已购买的商品？",
+    "answer": "确认收货后，进入订单详情页面，点击“评价”按钮即可进行晒单和评价。",
+    "category": "售后与评价",
+    "keywords": [
+      "评价",
+      "晒单",
+      "订单详情",
+      "确认收货"
+    ],
+    "source": "conversation_sess_020",
+    "confidence": 0.95
   }
 ]

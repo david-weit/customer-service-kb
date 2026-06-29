@@ -11,16 +11,19 @@ class ConversationLoader:
     def __init__(self, data_dir: Optional[Path] = None):
         self.data_dir = data_dir or config.CONVERSATIONS_DIR
         self.data_dir.mkdir(parents=True, exist_ok=True)
-
     def load_conversations(self) -> List[Dict]:
         """优先加载已有对话数据，不存在时生成示例。"""
+
         if config.CONVERSATIONS_JSON_PATH.exists():
+            print(f"✅ 加载 {config.CONVERSATIONS_JSON_PATH} 文件")
             return self.load_from_json(str(config.CONVERSATIONS_JSON_PATH))
 
         if config.CONVERSATIONS_CSV_PATH.exists():
+            print(f"✅ 加载 {config.CONVERSATIONS_CSV_PATH} 文件")
             return self.load_from_csv(str(config.CONVERSATIONS_CSV_PATH))
 
         if config.RAW_LOGS_PATH.exists():
+            print(f"✅ 加载 {config.RAW_LOGS_PATH} 文件")
             return self._convert_raw_logs(config.RAW_LOGS_PATH)
 
         return self.load_sample_conversations()
