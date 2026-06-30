@@ -1,12 +1,13 @@
 # customer-service-kb
 
-基于 RAG（检索增强生成）的 AI 客服知识库系统。从历史客服对话中自动提取 FAQ，构建向量知识库，并通过大语言模型实现智能问答。
+基于 RAG（检索增强生成）的 AI 客服知识库系统。从历史客服对话中自动提取 FAQ，构建混合检索知识库，并通过大语言模型实现智能问答。
 
 ## 功能特性
 
 - **对话加载**：支持 JSON、CSV 及旧版 `raw_logs.csv` 格式，无数据时自动生成示例对话
 - **FAQ 自动生成**：使用 LLM 从客服对话中提取、标准化问答对，并支持去重
-- **向量知识库**：基于 ChromaDB + HuggingFace 本地 Embedding 存储与检索 FAQ
+- **混合检索**：ChromaDB 向量检索 + BM25 关键词检索（`EnsembleRetriever` 融合），BM25 使用 jieba 中文分词
+- **多查询扩展**：将用户短查询扩展为多条客服场景问法，提升召回率
 - **RAG 问答**：检索相关知识后由 LLM 生成简洁、友好的客服回复
 - **评估模块**：支持批量测试与检索命中率统计
 
@@ -22,10 +23,13 @@ ConversationLoader ──► FAQGenerator (LLM 提取 + 去重)
     │                  extracted_qa.csv / .json
     │                        │
     ▼                        ▼
-KnowledgeBaseManager (ChromaDB 向量库)
+KnowledgeBaseManager (ChromaDB + BM25 混合检索)
     │
     ▼
-RAGAgent (检索 + LLM 生成)
+RAGAgent
+    ├── QueryExpander   (多查询扩展)
+    ├── HybridRetriever (向量 + BM25)
+    └── LLM 生成回答
     │
     ▼
 客服问答
@@ -48,10 +52,14 @@ customer-service-kb/
 ├── src/
 │   ├── data_loader.py      # 对话数据加载
 │   ├── faq_generator.py    # FAQ 提取与导出
-│   ├── vector_store.py     # ChromaDB 向量库管理
+│   ├── vector_store.py     # ChromaDB 向量库与混合检索管理
+│   ├── hybrid_retriever.py # BM25 + 向量混合检索
+│   ├── query_expansion.py  # 多查询扩展
 │   ├── rag_agent.py        # RAG 问答 Agent
 │   ├── evaluator.py        # 批量评估
+│   ├── logger.py           # 日志
 │   └── utils.py            # 通用工具函数
+├── logs/                   # 运行日志（自动生成）
 └── chroma_db/              # 向量库持久化目录（运行后自动生成）
 ```
 
@@ -69,7 +77,11 @@ cd customer-service-kb
 pip install -r requirements.txt
 ```
 
-首次运行会自动下载 HuggingFace Embedding 模型（`sentence-transformers/all-MiniLM-L6-v2`），可能需要一些时间。
+首次运行会自动下载 HuggingFace Embedding 模型（`sentence-transformers/all-MiniLM-L6-v2`），可能需要一些时间。若下载失败，可设置镜像：
+
+```bash
+export HF_ENDPOINT=https://hf-mirror.com
+```
 
 ### 2. 配置环境变量
 
@@ -101,8 +113,18 @@ python main.py
 
 1. 加载历史对话
 2. 使用 LLM 提取并去重 FAQ，导出到 `data/conversations/extracted_qa.csv` 和 `.json`
-3. 将 FAQ 写入 ChromaDB 向量库
+3. 重置 ChromaDB 向量库，将 FAQ 写入并构建混合检索器
 4. 进入交互式问答模式（输入 `exit` 退出）
+
+问答时会打印扩展查询与召回文档摘要，便于调试检索效果。
+
+## 检索流程说明
+
+用户提问后，`RAGAgent` 按以下步骤检索：
+
+1. **查询扩展**：`QueryExpander` 将原始问题扩展为多条电商客服场景问法（过滤行业分析类噪声）
+2. **混合检索**：原始查询以 `TOP_K` 检索，扩展查询以 `EXPANDED_QUERY_K` 检索
+3. **融合去重**：合并结果并截断至 `MAX_RETRIEVED_DOCS` 条，送入 LLM 生成回答
 
 ## 数据格式说明
 
@@ -141,7 +163,9 @@ python main.py
 | `EMBEDDING_MODEL_LOCAL` | `sentence-transformers/all-MiniLM-L6-v2` | 本地 Embedding 模型 |
 | `CHUNK_SIZE` | `500` | 文档分块大小 |
 | `CHUNK_OVERLAP` | `50` | 分块重叠长度 |
-| `TOP_K` | `5` | 检索返回的文档数量 |
+| `TOP_K` | `5` | 原始查询检索返回的文档数量 |
+| `EXPANDED_QUERY_K` | `2` | 扩展查询每条检索的文档数量 |
+| `MAX_RETRIEVED_DOCS` | `8` | 合并去重后送入 LLM 的最大文档数 |
 | `SIMILARITY_THRESHOLD` | `0.7` | 相似度阈值 |
 
 LLM 模型在 `main.py` 中配置，默认使用 DeepSeek Chat。
@@ -169,9 +193,19 @@ llm = init_chat_model(
 )
 
 kb = KnowledgeBaseManager()
-agent = create_rag_agent(llm, kb)
+kb.reset_collection()
+kb.add_faqs([
+    {
+        "question": "如何查看快递物流信息？",
+        "answer": "进入订单详情，点击【查看物流】即可追踪实时位置。",
+        "category": "物流查询",
+        "keywords": ["物流", "快递"],
+        "source": "conversation_sess_005",
+    }
+])
 
-result = agent.answer("如何退货？")
+agent = create_rag_agent(llm, kb)
+result = agent.answer("物流")
 print(result["answer"])
 ```
 
@@ -197,6 +231,7 @@ print(metrics)
 - [LangChain](https://python.langchain.com/) — LLM 编排与结构化输出
 - [ChromaDB](https://www.trychroma.com/) — 向量数据库
 - [sentence-transformers](https://www.sbert.net/) — 本地文本 Embedding
+- [rank-bm25](https://github.com/dorianbrown/rank_bm25) + [jieba](https://github.com/fxsjy/jieba) — BM25 关键词检索与中文分词
 - [DeepSeek API](https://platform.deepseek.com/) — 大语言模型（可替换为其他 OpenAI 兼容接口）
 
 ## 许可证

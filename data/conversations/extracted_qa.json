@@ -10,7 +10,7 @@
       "签收"
     ],
     "source": "conversation_sess_001",
-    "confidence": 0.95
+    "confidence": 1.0
   },
   {
     "question": "收货地址填错了如何修改？",
@@ -66,19 +66,6 @@
     "confidence": 0.95
   },
   {
-    "question": "运费如何计算？",
-    "answer": "订单满99元包邮，未满99元收取10元基础运费。",
-    "category": "配送与运费",
-    "keywords": [
-      "运费",
-      "包邮",
-      "满99元",
-      "基础运费"
-    ],
-    "source": "conversation_sess_013",
-    "confidence": 1.0
-  },
-  {
     "question": "可以指定快递公司吗？",
     "answer": "暂不支持指定快递，我们会为您选择最优配送服务。",
     "category": "物流配送",
@@ -122,7 +109,6 @@
     "category": "售后与评价",
     "keywords": [
       "评价",
-      "商品评价",
       "晒单",
       "订单详情",
       "确认收货"

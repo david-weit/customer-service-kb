@@ -49,6 +49,7 @@ def main():
 
     if unique_faqs:
         faq_dicts = [faq.model_dump() for faq in unique_faqs]
+        kb.reset_collection()
         kb.add_faqs(faq_dicts)
 
     print("\n🚀 启动RAG Agent（已启用多查询检索）...")

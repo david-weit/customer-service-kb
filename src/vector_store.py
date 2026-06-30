@@ -22,7 +22,29 @@ class KnowledgeBaseManager:
         )
         self.client = chromadb.PersistentClient(self.persist_dir)
         self.vectorstore = None
+        self.hybrid_retriever = None
+        self.documents: List[Document] = []
         self._load_or_create()
+
+    def create_hybrid_retriever(
+        self, documents: Optional[List[Document]] = None
+    ) -> None:
+        """创建混合检索器（需在文档入库后调用）。"""
+        from .hybrid_retriever import HybridRetriever
+
+        docs = documents if documents is not None else self.documents
+        if not docs:
+            self.hybrid_retriever = None
+            return
+
+        self.documents = docs
+        self.hybrid_retriever = HybridRetriever(
+            self.vectorstore,
+            self.documents,
+            weights=[0.5, 0.5],
+            k=config.TOP_K,
+        )
+        print("✅ 混合检索器创建完成")
 
     def _load_or_create(self):
         """加载或创建向量库。"""
@@ -32,6 +54,17 @@ class KnowledgeBaseManager:
             embedding_function=self.embeddings,
         )
         print(f"📂 向量库就绪: {self.collection_name}")
+
+    def reset_collection(self) -> None:
+        """清空向量库 collection，重置文档与混合检索器。"""
+        try:
+            self.client.delete_collection(self.collection_name)
+        except Exception:
+            pass
+        self.documents = []
+        self.hybrid_retriever = None
+        self._load_or_create()
+        print("✅ 向量库已重置")
 
     def add_documents(self, docs: List[Document], metadata: Optional[Dict] = None):
         """添加文档到知识库（自动分块）。"""
@@ -48,6 +81,8 @@ class KnowledgeBaseManager:
                 chunk.metadata.update(metadata)
 
         self.vectorstore.add_documents(chunks)
+        self.documents.extend(chunks)
+        self.create_hybrid_retriever()
         print(f"✅ 添加 {len(chunks)} 个文档块到知识库")
 
     def add_faqs(self, faqs: List[Dict]):
@@ -68,11 +103,17 @@ class KnowledgeBaseManager:
             )
 
         self.vectorstore.add_documents(docs)
+        self.documents.extend(docs)
+        self.create_hybrid_retriever()
         print(f"✅ 添加 {len(faqs)} 条FAQ到知识库")
 
     def search(self, query: str, k: Optional[int] = None) -> List[Document]:
-        """检索相关文档。"""
-        return self.vectorstore.similarity_search(query, k=k or config.TOP_K)
+        """混合检索"""
+        limit = k or config.TOP_K
+        if self.hybrid_retriever:
+            docs = self.hybrid_retriever.retrieve(query)
+            return docs[:limit]
+        return self.vectorstore.similarity_search(query, k=limit)
 
     def get_collection_stats(self):
         """获取向量库统计信息。"""
