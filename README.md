@@ -10,6 +10,7 @@
 - **多查询扩展**：将用户短查询扩展为多条客服场景问法，提升召回率
 - **RAG 问答**：检索相关知识后由 LLM 生成简洁、友好的客服回复
 - **评估模块**：支持批量测试与检索命中率统计
+- **MCP 服务**：通过 Model Context Protocol 对外暴露知识库查询接口，供 Cursor 等 AI 客户端调用
 
 ## 系统架构
 
@@ -32,8 +33,10 @@ RAGAgent
     └── LLM 生成回答
     │
     ▼
-客服问答
+客服问答 / MCP 客户端
 ```
+
+MCP 模式下，外部 AI 客户端通过 stdio 协议调用 `mcp-server/`，底层复用同一套 `RAGAgent` 与知识库。
 
 ## 项目结构
 
@@ -47,8 +50,8 @@ customer-service-kb/
 │   │   ├── raw_logs.csv
 │   │   ├── extracted_qa.csv
 │   │   └── extracted_qa.json
-│   └── raw/
-│       └── faq_manual.csv  # 手工维护的 FAQ
+│   ├── raw/
+│   │   └── faq_manual.csv  # 手工维护的 FAQ
 │   └── eval/               # 评估结果（运行 --eval 后生成）
 │       └── eval_results.csv
 ├── src/
@@ -61,7 +64,14 @@ customer-service-kb/
 │   ├── evaluator.py        # 批量评估
 │   ├── logger.py           # 日志
 │   └── utils.py            # 通用工具函数
+├── mcp-server/             # MCP 服务（对外暴露 RAG 能力）
+│   ├── server.py           # MCP 服务器主入口
+│   ├── rag_service.py      # RAG 服务包装器
+│   ├── test_client.py      # MCP 客户端测试脚本
+│   ├── quick_test.py       # 导入检查脚本
+│   └── requirements.txt    # MCP 额外依赖
 ├── logs/                   # 运行日志（自动生成）
+├── docker-compose.yml      # Docker 编排（含 app / mcp 服务）
 └── chroma_db/              # 向量库持久化目录（运行后自动生成）
 ```
 
@@ -139,6 +149,107 @@ python main.py --eval --test-file data/conversations/extracted_qa.csv
 | `with_context` | 至少召回 1 条上下文的问答数 |
 
 结果保存至 `data/eval/eval_results.csv`，包含 `question`、`expected`、`actual`、`context_count` 字段。
+
+## MCP 服务
+
+[`mcp-server/`](mcp-server/) 将 RAG 知识库封装为 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务，供 Cursor、Claude Desktop 等 AI 客户端通过 stdio 协议调用。
+
+### 架构
+
+```
+AI 客户端 (Cursor / Claude Desktop)
+    │  stdio
+    ▼
+mcp-server/server.py
+    │
+    ▼
+rag_service.py → RAGAgent + KnowledgeBaseManager（复用 src/）
+```
+
+### 提供的 MCP 能力
+
+**Tools（工具）**
+
+| 工具名 | 说明 | 参数 |
+|--------|------|------|
+| `query_knowledge_base` | 查询客服知识库并返回答案 | `question`（必填） |
+| `get_knowledge_base_stats` | 获取知识库统计信息 | 无 |
+
+**Resources（资源）**
+
+| URI | 说明 |
+|-----|------|
+| `knowledge-base://faqs` | FAQ 列表（只读） |
+| `knowledge-base://stats` | 知识库实时状态 |
+
+**Prompts（提示模板）**
+
+| 名称 | 说明 |
+|------|------|
+| `greeting` | 客服问候语（可选 `customer_name`） |
+| `query_with_context` | 带上下文的查询模板（`question` + `context`） |
+
+### 本地启动
+
+先确保主项目依赖与知识库已就绪（`chroma_db/` 中有 FAQ 数据，`.env` 已配置 `DEEPSEEK_API_KEY`）：
+
+```bash
+# 安装 MCP 额外依赖
+pip install -r mcp-server/requirements.txt
+
+# 启动 MCP 服务器（stdio 模式，等待客户端连接）
+cd mcp-server
+python server.py
+```
+
+### 测试 MCP 服务
+
+```bash
+# 检查 src 模块导入是否正常
+python mcp-server/quick_test.py
+
+# 完整功能测试（需从项目根目录运行）
+python mcp-server/test_client.py
+```
+
+### Docker 启动
+
+项目 [`docker-compose.yml`](docker-compose.yml) 提供 `mcp` 服务（profile 模式，默认不启动）：
+
+```bash
+# 仅启动 MCP 服务
+docker compose --profile mcp up mcp
+
+# 同时启动交互式 app 与 MCP
+docker compose --profile mcp up
+```
+
+| 服务 | 说明 |
+|------|------|
+| `app` | 运行 `python main.py` 交互问答 |
+| `mcp` | 运行 `python server.py` MCP 服务 |
+
+两个服务共享 `data/`、`chroma_db/`、`logs/` 卷与 `.env` 配置。
+
+### 在 Cursor 中配置
+
+在项目或全局 MCP 配置中添加（路径按实际环境修改）：
+
+```json
+{
+  "mcpServers": {
+    "customer-service-kb": {
+      "command": "python",
+      "args": ["/path/to/customer-service-kb/mcp-server/server.py"],
+      "env": {
+        "DEEPSEEK_API_KEY": "your_api_key"
+      }
+    }
+  }
+}
+```
+
+配置完成后，AI 客户端即可通过 `query_knowledge_base` 工具查询客服知识库。
 
 ## 检索流程说明
 
@@ -253,6 +364,7 @@ evaluator.save_results(results)
 - [ChromaDB](https://www.trychroma.com/) — 向量数据库
 - [sentence-transformers](https://www.sbert.net/) — 本地文本 Embedding
 - [rank-bm25](https://github.com/dorianbrown/rank_bm25) + [jieba](https://github.com/fxsjy/jieba) — BM25 关键词检索与中文分词
+- [MCP SDK](https://github.com/modelcontextprotocol/python-sdk) — Model Context Protocol 服务接口
 - [DeepSeek API](https://platform.deepseek.com/) — 大语言模型（可替换为其他 OpenAI 兼容接口）
 
 ## 许可证
