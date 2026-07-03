@@ -49,6 +49,8 @@ customer-service-kb/
 │   │   └── extracted_qa.json
 │   └── raw/
 │       └── faq_manual.csv  # 手工维护的 FAQ
+│   └── eval/               # 评估结果（运行 --eval 后生成）
+│       └── eval_results.csv
 ├── src/
 │   ├── data_loader.py      # 对话数据加载
 │   ├── faq_generator.py    # FAQ 提取与导出
@@ -117,6 +119,26 @@ python main.py
 4. 进入交互式问答模式（输入 `exit` 退出）
 
 问答时会打印扩展查询与召回文档摘要，便于调试检索效果。
+
+### 5. 批量评估
+
+知识库构建完成后，可使用 `--eval` 对测试集运行批量评估（默认使用 `data/conversations/extracted_qa.csv`）：
+
+```bash
+python main.py --eval
+python main.py --eval --test-file data/conversations/extracted_qa.csv
+```
+
+测试集 CSV 需包含 `question` 列，可选 `answer` 列作为期望答案参考。
+
+评估指标：
+
+| 指标 | 说明 |
+|------|------|
+| `context_rate` | 检索到相关文档的问答占比（检索命中率） |
+| `with_context` | 至少召回 1 条上下文的问答数 |
+
+结果保存至 `data/eval/eval_results.csv`，包含 `question`、`expected`、`actual`、`context_count` 字段。
 
 ## 检索流程说明
 
@@ -209,21 +231,20 @@ result = agent.answer("物流")
 print(result["answer"])
 ```
 
-### 批量评估
+### 批量评估（代码调用）
+
+也可在代码中直接使用 `Evaluator`：
 
 ```python
 import pandas as pd
 from src.evaluator import Evaluator
 
-test_cases = pd.DataFrame([
-    {"question": "如何退货？", "answer": "7天无理由退货"},
-    {"question": "发货要多久？", "answer": "24-48小时内发货"},
-])
-
+test_cases = pd.read_csv("data/conversations/extracted_qa.csv")
 evaluator = Evaluator(agent)
 results = evaluator.evaluate_batch(test_cases)
 metrics = evaluator.compute_metrics(results)
-print(metrics)
+evaluator.print_report(results, metrics)
+evaluator.save_results(results)
 ```
 
 ## 技术栈

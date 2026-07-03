@@ -1,9 +1,13 @@
+import argparse
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 
+import config
 from src.data_loader import ConversationLoader
+from src.evaluator import Evaluator
 from src.faq_generator import FAQGenerator
 from src.rag_agent import create_rag_agent
 from src.vector_store import KnowledgeBaseManager
@@ -11,7 +15,8 @@ from src.vector_store import KnowledgeBaseManager
 load_dotenv()
 
 
-def main():
+def setup_agent():
+    """加载对话 → 生成 FAQ → 构建知识库 → 返回 (llm, agent)。"""
     print("=" * 60)
     print("🤖 AI客服知识库系统 v1.0")
     print("=" * 60)
@@ -49,12 +54,35 @@ def main():
 
     if unique_faqs:
         faq_dicts = [faq.model_dump() for faq in unique_faqs]
-        kb.reset_collection()
+        # kb.reset_collection()
         kb.add_faqs(faq_dicts)
 
     print("\n🚀 启动RAG Agent（已启用多查询检索）...")
     agent = create_rag_agent(llm, kb)
+    return llm, agent
 
+
+def run_evaluation(agent, test_file: Path) -> None:
+    """运行批量评估。"""
+    import pandas as pd
+
+    if not test_file.exists():
+        raise FileNotFoundError(f"测试集不存在: {test_file}")
+
+    print(f"\n📊 开始评估，测试集: {test_file}")
+    test_cases = pd.read_csv(test_file)
+
+    evaluator = Evaluator(agent)
+    results = evaluator.evaluate_batch(test_cases)
+    metrics = evaluator.compute_metrics(results)
+    evaluator.print_report(results, metrics)
+
+    output_path = evaluator.save_results(results)
+    print(f"\n结果已保存: {output_path}")
+
+
+def run_chat(agent) -> None:
+    """交互式问答。"""
     print("\n💬 测试问答 (输入 'exit' 退出)")
     while True:
         query = input("\n👤 用户: ")
@@ -65,6 +93,25 @@ def main():
         print(f"🤖 客服: {response}")
 
     print("\n✅ 系统运行结束")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="AI 客服知识库系统")
+    parser.add_argument("--eval", action="store_true", help="运行批量评估")
+    parser.add_argument(
+        "--test-file",
+        type=Path,
+        default=config.DEFAULT_TEST_PATH,
+        help="评估测试集 CSV 路径（需含 question 列）",
+    )
+    args = parser.parse_args()
+
+    _, agent = setup_agent()
+
+    if args.eval:
+        run_evaluation(agent, args.test_file)
+    else:
+        run_chat(agent)
 
 
 if __name__ == "__main__":

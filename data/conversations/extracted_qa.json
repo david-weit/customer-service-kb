@@ -10,7 +10,7 @@
       "签收"
     ],
     "source": "conversation_sess_001",
-    "confidence": 0.95
+    "confidence": 1.0
   },
   {
     "question": "收货地址填错了如何修改？",
@@ -30,10 +30,11 @@
     "answer": "进入订单详情，点击【查看物流】即可追踪实时位置。",
     "category": "物流查询",
     "keywords": [
-      "查看物流",
-      "快递追踪",
+      "快递",
+      "物流",
+      "查看",
       "订单详情",
-      "物流信息"
+      "追踪"
     ],
     "source": "conversation_sess_005",
     "confidence": 0.95
@@ -46,11 +47,10 @@
       "发票",
       "增值税普通发票",
       "增值税专用发票",
-      "开票信息",
-      "下单"
+      "开票信息"
     ],
     "source": "conversation_sess_008",
-    "confidence": 0.98
+    "confidence": 0.95
   },
   {
     "question": "如何取消订单？",
@@ -66,32 +66,19 @@
     "confidence": 0.95
   },
   {
-    "question": "运费如何计算？",
-    "answer": "订单满99元包邮，未满99元收取10元基础运费。",
-    "category": "运费政策",
-    "keywords": [
-      "运费",
-      "包邮",
-      "满99元",
-      "基础运费"
-    ],
-    "source": "conversation_sess_013",
-    "confidence": 1.0
-  },
-  {
     "question": "可以指定快递公司吗？",
     "answer": "暂不支持指定快递，我们会为您选择最优配送服务。",
-    "category": "配送服务",
+    "category": "物流配送",
     "keywords": [
       "指定快递",
       "快递公司",
       "配送服务"
     ],
     "source": "conversation_sess_015",
-    "confidence": 0.95
+    "confidence": 1.0
   },
   {
-    "question": "海外能买吗？",
+    "question": "海外能否购买商品？",
     "answer": "支持全球配送，具体运费可在结算页面查询。",
     "category": "配送与物流",
     "keywords": [
@@ -101,7 +88,7 @@
       "结算页面"
     ],
     "source": "conversation_sess_016",
-    "confidence": 1.0
+    "confidence": 0.95
   },
   {
     "question": "如何激活会员卡？",
@@ -117,30 +104,16 @@
     "confidence": 0.95
   },
   {
-    "question": "尺码怎么选？",
-    "answer": "请参考商品详情页的尺码对照表，或咨询客服。",
-    "category": "尺码与选择",
-    "keywords": [
-      "尺码",
-      "选择",
-      "尺码对照表",
-      "咨询客服"
-    ],
-    "source": "conversation_sess_018",
-    "confidence": 0.95
-  },
-  {
     "question": "如何评价已购买的商品？",
-    "answer": "确认收货后进入订单详情，点击评价即可晒单。",
+    "answer": "确认收货后，进入订单详情页面，点击“评价”按钮即可进行晒单评价。",
     "category": "售后与评价",
     "keywords": [
       "评价",
-      "商品",
       "晒单",
       "订单详情",
       "确认收货"
     ],
     "source": "conversation_sess_020",
-    "confidence": 0.95
+    "confidence": 0.98
   }
 ]

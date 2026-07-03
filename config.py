@@ -21,6 +21,11 @@ EXTRACTED_QA_JSON_PATH = CONVERSATIONS_DIR / "extracted_qa.json"
 CONVERSATIONS_JSON_PATH = CONVERSATIONS_DIR / "conversations.json"
 CONVERSATIONS_CSV_PATH = CONVERSATIONS_DIR / "conversations.csv"
 
+# 评估
+EVAL_DIR = DATA_DIR / "eval"
+EVAL_RESULTS_PATH = EVAL_DIR / "eval_results.csv"
+DEFAULT_TEST_PATH = EXTRACTED_QA_PATH
+
 # 向量数据库
 CHROMA_DB_DIR = BASE_DIR / "chroma_db"
 COLLECTION_NAME = "customer_service_kb"
