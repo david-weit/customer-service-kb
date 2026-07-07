@@ -11,6 +11,7 @@
 - **RAG 问答**：检索相关知识后由 LLM 生成简洁、友好的客服回复
 - **评估模块**：支持批量测试与检索命中率统计
 - **MCP 服务**：通过 Model Context Protocol 对外暴露知识库查询接口，供 Cursor 等 AI 客户端调用
+- **CI/CD**：基于 GitHub Actions 自动执行测试，并在推送到 `master` 后自动构建与推送 Docker 镜像到 Docker Hub
 
 ## 系统架构
 
@@ -149,6 +150,47 @@ python main.py --eval --test-file data/conversations/extracted_qa.csv
 | `with_context` | 至少召回 1 条上下文的问答数 |
 
 结果保存至 `data/eval/eval_results.csv`，包含 `question`、`expected`、`actual`、`context_count` 字段。
+
+## CI/CD（GitHub Actions + Docker Hub）
+
+项目已配置 GitHub Actions 工作流：`.github/workflows/ci.yml`。
+
+### 触发规则
+
+- `pull_request` 到 `master`：只运行测试任务（`test`）
+- `push` 到 `master`：先运行测试，测试通过后执行镜像构建与推送（`docker`）
+
+### 测试任务（test）
+
+测试在 GitHub Hosted Runner（`ubuntu-latest`）上执行，包含：
+
+- `python -m compileall -q src mcp-server`：语法检查
+- `python mcp-server/quick_test.py`：关键模块导入冒烟测试
+
+### 镜像构建与发布（docker）
+
+- 登录 Docker Hub（使用仓库 Secrets）
+- 使用 Buildx 构建多架构镜像：`linux/amd64`、`linux/arm64`
+- 推送镜像：`<DOCKERHUB_USERNAME>/customer-service-kb:latest`
+
+### 必要仓库 Secrets
+
+在 GitHub 仓库 `Settings -> Secrets and variables -> Actions` 中配置：
+
+- `DOCKERHUB_USERNAME`：Docker Hub 用户名
+- `DOCKERHUB_TOKEN`：Docker Hub Access Token（建议 Read & Write 权限）
+
+### 本地拉取与运行
+
+```bash
+# 拉取最新镜像
+docker pull <你的DockerHub用户名>/customer-service-kb:latest
+
+# 运行交互式问答
+docker run -it --rm \
+  -e DEEPSEEK_API_KEY=your_deepseek_api_key \
+  <你的DockerHub用户名>/customer-service-kb:latest
+```
 
 ## MCP 服务
 
