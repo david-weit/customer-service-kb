@@ -19,9 +19,6 @@ COPY mcp-server/requirements.txt requirements-mcp.txt
 
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-mcp.txt
 
-# 预下载 Embedding 模型（用 huggingface_hub 避免构建时加载 PyTorch）
-RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('sentence-transformers/all-MiniLM-L6-v2')"
-
 COPY . .
 
 CMD ["python", "main.py"]
