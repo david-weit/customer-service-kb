@@ -56,7 +56,5 @@ jobs:
           context: .
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/customer-service-kb:latest
-          build-args: |
-            HF_ENDPOINT=https://hf-mirror.com
           cache-from: type=gha
           cache-to: type=gha,mode=max
