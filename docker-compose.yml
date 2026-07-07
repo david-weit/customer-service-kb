@@ -1,0 +1,28 @@
+services:
+  app:
+    build: .
+    stdin_open: true
+    tty: true
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./chroma_db:/app/chroma_db
+      - ./logs:/app/logs
+      - hf_cache:/app/.cache/huggingface
+    command: python main.py
+
+  mcp:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./chroma_db:/app/chroma_db
+      - ./logs:/app/logs
+      - hf_cache:/app/.cache/huggingface
+    working_dir: /app/mcp-server
+    command: python server.py
+    profiles:
+      - mcp
+
+volumes:
+  hf_cache:

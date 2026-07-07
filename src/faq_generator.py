@@ -56,7 +56,6 @@ class FAQGenerator:
                 )
                 if qa:
                     qa_pairs.append(qa)
-
         return qa_pairs
 
     def _pair_qa_messages(self, messages: List[Dict]) -> List[tuple[str, str]]:

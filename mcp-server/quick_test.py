@@ -21,3 +21,4 @@ try:
     print("🎉 所有导入正常！")
 except ImportError as e:
     print(f"❌ 导入失败: {e}")
+    sys.exit(1)

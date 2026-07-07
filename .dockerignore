@@ -1,0 +1,11 @@
+.git
+__pycache__
+*.pyc
+.env
+logs/
+chroma_db/
+.cache/
+.venv/
+*.code-workspace
+.cursor/
+*.plan.md

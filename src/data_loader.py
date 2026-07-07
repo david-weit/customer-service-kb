@@ -102,7 +102,6 @@ class ConversationLoader:
                     "timestamp": timestamp,
                 }
             )
-
         return conversations
 
     def load_sample_conversations(self):
