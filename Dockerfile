@@ -20,5 +20,8 @@ COPY mcp-server/requirements.txt requirements-mcp.txt
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-mcp.txt
 
 COPY . .
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "main.py"]
