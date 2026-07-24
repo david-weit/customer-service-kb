@@ -3,6 +3,8 @@ from typing import List
 
 from langchain_core.prompts import ChatPromptTemplate
 
+from src.utils import sanitize_text
+
 
 class QueryExpander:
     def __init__(self, llm):
@@ -13,7 +15,7 @@ class QueryExpander:
         blocked_terms = ("行业", "趋势", "技术方案", "可持续", "供应链", "创新方案")
         cleaned = []
         for line in raw_lines:
-            line = line.strip()
+            line = sanitize_text(line).strip()
             if not line:
                 continue
             line = re.sub(r"^[\d]+[\.\)、]\s*", "", line)
@@ -25,6 +27,7 @@ class QueryExpander:
         return cleaned[:n_queries]
 
     def generate_queries(self, original_query: str, n_queries: int) -> List[str]:
+        original_query = sanitize_text(original_query)
         prompt = """你是电商客服系统的查询扩展助手。根据用户问题，生成 {n_queries} 个用户可能会问的客服问题。
 
 原始问题: {query}
@@ -41,6 +44,7 @@ class QueryExpander:
         chain = pt | self.llm
         response = chain.invoke({"query": original_query, "n_queries": n_queries})
         content = response.content if hasattr(response, "content") else str(response)
+        content = sanitize_text(content)
         raw_lines = content.strip().split("\n")
         expanded = self._clean_queries(raw_lines, n_queries)
 

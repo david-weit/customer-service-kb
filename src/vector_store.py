@@ -7,6 +7,7 @@ from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 import config
+from src.utils import sanitize_text
 
 
 class KnowledgeBaseManager:
@@ -67,29 +68,53 @@ class KnowledgeBaseManager:
         print("✅ 向量库已重置")
 
     def add_documents(self, docs: List[Document], metadata: Optional[Dict] = None):
-        """添加文档到知识库（自动分块）。"""
+        """添加文档到知识库。
+
+        默认按 CHUNK_SIZE 分块；若 Document.metadata['pre_chunked'] 为 True
+        （如 Excel 行 / JSON 结构块），则跳过二次切分。
+        """
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=config.CHUNK_SIZE,
             chunk_overlap=config.CHUNK_OVERLAP,
             separators=["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""],
         )
 
-        chunks = text_splitter.split_documents(docs)
+        ready: List[Document] = []
+        to_split: List[Document] = []
+        for doc in docs:
+            doc.page_content = sanitize_text(doc.page_content)
+            if not doc.page_content.strip():
+                continue
+            if doc.metadata.get("pre_chunked"):
+                ready.append(doc)
+            else:
+                to_split.append(doc)
+
+        if to_split:
+            ready.extend(text_splitter.split_documents(to_split))
 
         if metadata:
-            for chunk in chunks:
+            for chunk in ready:
                 chunk.metadata.update(metadata)
 
-        self.vectorstore.add_documents(chunks)
-        self.documents.extend(chunks)
+        if not ready:
+            print("⚠️ 没有可入库的文档块")
+            return
+
+        self.vectorstore.add_documents(ready)
+        self.documents.extend(ready)
         self.create_hybrid_retriever()
-        print(f"✅ 添加 {len(chunks)} 个文档块到知识库")
+        print(f"✅ 添加 {len(ready)} 个文档块到知识库")
 
     def add_faqs(self, faqs: List[Dict]):
         """添加 FAQ 到知识库（整段入库，不分块）。"""
         docs = []
         for faq in faqs:
-            content = f"问题：{faq['question']}\n答案：{faq['answer']}"
+            content = sanitize_text(
+                f"问题：{faq['question']}\n答案：{faq['answer']}"
+            )
+            if not content.strip():
+                continue
             docs.append(
                 Document(
                     page_content=content,
@@ -102,10 +127,14 @@ class KnowledgeBaseManager:
                 )
             )
 
+        if not docs:
+            print("⚠️ 没有可入库的 FAQ")
+            return
+
         self.vectorstore.add_documents(docs)
         self.documents.extend(docs)
         self.create_hybrid_retriever()
-        print(f"✅ 添加 {len(faqs)} 条FAQ到知识库")
+        print(f"✅ 添加 {len(docs)} 条FAQ到知识库")
 
     def search(self, query: str, k: Optional[int] = None) -> List[Document]:
         """混合检索"""

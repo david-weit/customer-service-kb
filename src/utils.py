@@ -7,6 +7,21 @@ from typing import Any
 import pandas as pd
 
 
+def sanitize_text(text: Any) -> str:
+    """清洗文本，移除 UTF-8 无法编码的 surrogate 等非法字符。
+
+    解析 PDF/DOCX 或脏数据入库后，调用 LLM API 时可能触发：
+    UnicodeEncodeError: surrogates not allowed
+    """
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
+    # 去掉 NUL，再用 utf-8 ignore 丢掉 surrogate（U+D800–U+DFFF）
+    text = text.replace("\x00", "")
+    return text.encode("utf-8", errors="ignore").decode("utf-8")
+
+
 def load_csv(path: Path) -> pd.DataFrame:
     """加载 CSV 文件。"""
     if not path.exists():
@@ -22,7 +37,7 @@ def save_csv(df: pd.DataFrame, path: Path) -> None:
 
 def load_text_file(path: Path) -> str:
     """加载文本文件内容。"""
-    return path.read_text(encoding="utf-8")
+    return sanitize_text(path.read_text(encoding="utf-8"))
 
 
 def load_json(path: Path) -> Any:

@@ -9,6 +9,7 @@
 - **混合检索**：ChromaDB 向量检索 + BM25 关键词检索（`EnsembleRetriever` 融合），BM25 使用 jieba 中文分词
 - **多查询扩展**：将用户短查询扩展为多条客服场景问法，提升召回率
 - **RAG 问答**：检索相关知识后由 LLM 生成简洁、友好的客服回复
+- **订单查询**：识别订单查询意图，调用 Mock 订单 API 获取物流状态，再结合知识库生成回复
 - **评估模块**：支持批量测试与检索命中率统计
 - **MCP 服务**：通过 Model Context Protocol 对外暴露知识库查询接口，供 Cursor 等 AI 客户端调用
 - **CI/CD**：基于 GitHub Actions 自动执行测试，并在推送到 `master` 后自动构建与推送 Docker 镜像到 Docker Hub
@@ -29,6 +30,8 @@ KnowledgeBaseManager (ChromaDB + BM25 混合检索)
     │
     ▼
 RAGAgent
+    ├── IntentDetector  (订单意图 / 订单号提取)
+    ├── MockOrderAPI    (订单物流查询，可替换真实 API)
     ├── QueryExpander   (多查询扩展)
     ├── HybridRetriever (向量 + BM25)
     └── LLM 生成回答
@@ -61,7 +64,9 @@ customer-service-kb/
 │   ├── vector_store.py     # ChromaDB 向量库与混合检索管理
 │   ├── hybrid_retriever.py # BM25 + 向量混合检索
 │   ├── query_expansion.py  # 多查询扩展
-│   ├── rag_agent.py        # RAG 问答 Agent
+│   ├── intent.py           # 订单意图识别与订单号提取
+│   ├── order_api.py        # Mock 订单查询 API
+│   ├── rag_agent.py        # RAG 问答 Agent（含订单+知识库联合回复）
 │   ├── evaluator.py        # 批量评估
 │   ├── logger.py           # 日志
 │   └── utils.py            # 通用工具函数
@@ -273,6 +278,15 @@ docker compose --profile mcp up
 
 两个服务共享 `data/`、`chroma_db/`、`logs/` 卷与 `.env` 配置。
 
+### 容器启动自动补依赖
+
+镜像内置 `docker/entrypoint.sh`。容器每次启动时会先检查关键依赖（`sentence_transformers`、`langchain`、`chromadb`）是否可导入：
+
+- 依赖齐全：直接启动目标命令
+- 依赖缺失：自动执行 `pip install -r /app/requirements.txt -r /app/mcp-server/requirements.txt` 后再启动
+
+因此无论是默认启动 `python main.py`，还是手动启动 `python mcp-server/server.py`，都会先经过依赖自检与自愈流程。
+
 ### 在 Cursor 中配置
 
 在项目或全局 MCP 配置中添加（路径按实际环境修改）：
@@ -293,13 +307,44 @@ docker compose --profile mcp up
 
 配置完成后，AI 客户端即可通过 `query_knowledge_base` 工具查询客服知识库。
 
+## 订单查询
+
+当用户询问个人订单物流（如「订单还没收到，帮我查一下」）并提供订单号时，`RAGAgent` 会：
+
+1. 识别订单查询意图并提取订单号
+2. 调用 `MockOrderAPI` 获取物流状态（可替换为真实 HTTP API）
+3. 检索物流相关知识库 FAQ
+4. 将「订单实时状态（权威）」与「知识库政策」一并交给 LLM 生成回复
+
+未识别为订单查询时（如「怎么查看物流？」），仍走纯知识库 RAG。
+
+### 样例订单号
+
+| 订单号 | 状态 | 说明 |
+|--------|------|------|
+| `ORD20260101001` | 运输中 | 上海转运中心，预计 2 天后送达 |
+| `ORD20260101002` | 已签收 | 本人签收 |
+| `ORD20260101003` | 待发货 | 仓库备货中 |
+| `ORD20260101004` | 派送异常 | 联系不上收件人 |
+
+### 示例对话
+
+```text
+👤 用户: 我的订单还没收到，帮我查一下，订单号 ORD20260101001
+🤖 客服: 您的订单 ORD20260101001 当前为运输中，包裹已到达上海转运中心，预计 2 天后送达...
+
+👤 用户: 怎么查看物流？
+🤖 客服: （走知识库 FAQ，不调用订单 API）
+```
+
 ## 检索流程说明
 
-用户提问后，`RAGAgent` 按以下步骤检索：
+用户提问后，`RAGAgent` 按以下步骤处理：
 
-1. **查询扩展**：`QueryExpander` 将原始问题扩展为多条电商客服场景问法（过滤行业分析类噪声）
-2. **混合检索**：原始查询以 `TOP_K` 检索，扩展查询以 `EXPANDED_QUERY_K` 检索
-3. **融合去重**：合并结果并截断至 `MAX_RETRIEVED_DOCS` 条，送入 LLM 生成回答
+1. **意图识别**：判断是否为订单查询；若是则查询 Mock 订单 API
+2. **查询扩展**：`QueryExpander` 将原始问题扩展为多条电商客服场景问法（过滤行业分析类噪声）
+3. **混合检索**：原始查询以 `TOP_K` 检索，扩展查询以 `EXPANDED_QUERY_K` 检索
+4. **融合去重**：合并结果并截断至 `MAX_RETRIEVED_DOCS` 条，送入 LLM 生成回答（订单场景会附带订单状态）
 
 ## 数据格式说明
 

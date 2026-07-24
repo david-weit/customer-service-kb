@@ -7,6 +7,7 @@ from langchain.chat_models import init_chat_model
 
 import config
 from src.data_loader import ConversationLoader
+from src.document_loader import load_raw_documents
 from src.evaluator import Evaluator
 from src.faq_generator import FAQGenerator
 from src.rag_agent import create_rag_agent
@@ -16,7 +17,7 @@ load_dotenv()
 
 
 def setup_agent():
-    """加载对话 → 生成 FAQ → 构建知识库 → 返回 (llm, agent)。"""
+    """加载对话/文档 → 生成 FAQ → 构建知识库 → 返回 (llm, agent)。"""
     print("=" * 60)
     print("🤖 AI客服知识库系统 v1.0")
     print("=" * 60)
@@ -49,6 +50,10 @@ def setup_agent():
         print("⚠️ 没有生成FAQ，请检查对话数据")
         unique_faqs = []
 
+    print("\n📄 解析原始文档 (docx/pdf/excel/json)...")
+    raw_docs = load_raw_documents()
+    print(f"✅ 共解析 {len(raw_docs)} 个文档单元")
+
     print("\n📚 构建知识库...")
     kb = KnowledgeBaseManager()
 
@@ -56,6 +61,9 @@ def setup_agent():
         faq_dicts = [faq.model_dump() for faq in unique_faqs]
         # kb.reset_collection()
         kb.add_faqs(faq_dicts)
+
+    if raw_docs:
+        kb.add_documents(raw_docs)
 
     print("\n🚀 启动RAG Agent（已启用多查询检索）...")
     agent = create_rag_agent(llm, kb)
