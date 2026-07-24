@@ -8,8 +8,8 @@
 - **FAQ 自动生成**：使用 LLM 从客服对话中提取、标准化问答对，并支持去重
 - **混合检索**：ChromaDB 向量检索 + BM25 关键词检索（`EnsembleRetriever` 融合），BM25 使用 jieba 中文分词
 - **多查询扩展**：将用户短查询扩展为多条客服场景问法，提升召回率
-- **RAG 问答**：检索相关知识后由 LLM 生成简洁、友好的客服回复
-- **订单查询**：识别订单查询意图，调用 Mock 订单 API 获取物流状态，再结合知识库生成回复
+- **RAG 问答**：基于 LangGraph + Function Calling，由模型选择工具后生成客服回复
+- **订单查询**：通过 `query_order` 工具查询 Mock 订单 API，再结合知识库生成回复
 - **评估模块**：支持批量测试与检索命中率统计
 - **MCP 服务**：通过 Model Context Protocol 对外暴露知识库查询接口，供 Cursor 等 AI 客户端调用
 - **CI/CD**：基于 GitHub Actions 自动执行测试，并在推送到 `master` 后自动构建与推送 Docker 镜像到 Docker Hub
@@ -29,12 +29,10 @@ ConversationLoader ──► FAQGenerator (LLM 提取 + 去重)
 KnowledgeBaseManager (ChromaDB + BM25 混合检索)
     │
     ▼
-RAGAgent
-    ├── IntentDetector  (订单意图 / 订单号提取)
-    ├── MockOrderAPI    (订单物流查询，可替换真实 API)
-    ├── QueryExpander   (多查询扩展)
-    ├── HybridRetriever (向量 + BM25)
-    └── LLM 生成回答
+RAGAgent (LangGraph + Function Calling)
+    ├── agent          (LLM bind_tools 决定是否调工具)
+    ├── tools          (query_order / search_knowledge_base)
+    └── finalize       (生成最终回复)
     │
     ▼
 客服问答 / MCP 客户端
@@ -64,9 +62,11 @@ customer-service-kb/
 │   ├── vector_store.py     # ChromaDB 向量库与混合检索管理
 │   ├── hybrid_retriever.py # BM25 + 向量混合检索
 │   ├── query_expansion.py  # 多查询扩展
-│   ├── intent.py           # 订单意图识别与订单号提取
+│   ├── intent.py           # 订单意图规则（可选辅助；主路径已改为 Function Calling）
 │   ├── order_api.py        # Mock 订单查询 API
-│   ├── rag_agent.py        # RAG 问答 Agent（含订单+知识库联合回复）
+│   ├── tools.py            # Function Calling 工具定义
+│   ├── agent_graph.py      # LangGraph：agent ↔ tools 循环
+│   ├── rag_agent.py        # RAG Agent 薄封装
 │   ├── evaluator.py        # 批量评估
 │   ├── logger.py           # 日志
 │   └── utils.py            # 通用工具函数
@@ -309,14 +309,16 @@ docker compose --profile mcp up
 
 ## 订单查询
 
-当用户询问个人订单物流（如「订单还没收到，帮我查一下」）并提供订单号时，`RAGAgent` 会：
+当用户询问个人订单物流并提供订单号时，模型会通过 Function Calling 调用 `query_order` 工具；政策类问题调用 `search_knowledge_base`。
 
-1. 识别订单查询意图并提取订单号
-2. 调用 `MockOrderAPI` 获取物流状态（可替换为真实 HTTP API）
-3. 检索物流相关知识库 FAQ
-4. 将「订单实时状态（权威）」与「知识库政策」一并交给 LLM 生成回复
+### Function Calling 工具
 
-未识别为订单查询时（如「怎么查看物流？」），仍走纯知识库 RAG。
+| 工具 | 说明 |
+|------|------|
+| `query_order` | 查询 Mock 订单物流状态（需订单号） |
+| `search_knowledge_base` | 多查询扩展 + 混合检索知识库 |
+
+LangGraph 循环：`prepare → agent ⇄ tools → finalize`。模型在 `agent` 节点决定是否调工具；无 tool_calls 时进入 `finalize` 输出最终回复。
 
 ### 样例订单号
 
@@ -339,12 +341,13 @@ docker compose --profile mcp up
 
 ## 检索流程说明
 
-用户提问后，`RAGAgent` 按以下步骤处理：
+用户提问后，由 LangGraph + Function Calling 处理：
 
-1. **意图识别**：判断是否为订单查询；若是则查询 Mock 订单 API
-2. **查询扩展**：`QueryExpander` 将原始问题扩展为多条电商客服场景问法（过滤行业分析类噪声）
-3. **混合检索**：原始查询以 `TOP_K` 检索，扩展查询以 `EXPANDED_QUERY_K` 检索
-4. **融合去重**：合并结果并截断至 `MAX_RETRIEVED_DOCS` 条，送入 LLM 生成回答（订单场景会附带订单状态）
+1. **prepare**：写入 system / human 消息
+2. **agent**：LLM（`bind_tools`）决定直接回答或调用工具
+3. **tools**：执行 `query_order` / `search_knowledge_base`（后者含多查询扩展与混合检索）
+4. **循环**：工具结果回写消息后再次进入 agent，直到不再调用工具
+5. **finalize**：提取最终自然语言回复
 
 ## 数据格式说明
 
@@ -448,6 +451,7 @@ evaluator.save_results(results)
 ## 技术栈
 
 - [LangChain](https://python.langchain.com/) — LLM 编排与结构化输出
+- [LangGraph](https://langchain-ai.github.io/langgraph/) — 客服问答状态图与 Function Calling 工具循环
 - [ChromaDB](https://www.trychroma.com/) — 向量数据库
 - [sentence-transformers](https://www.sbert.net/) — 本地文本 Embedding
 - [rank-bm25](https://github.com/dorianbrown/rank_bm25) + [jieba](https://github.com/fxsjy/jieba) — BM25 关键词检索与中文分词

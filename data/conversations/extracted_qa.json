@@ -10,17 +10,18 @@
       "签收"
     ],
     "source": "conversation_sess_001",
-    "confidence": 1.0
+    "confidence": 0.95
   },
   {
     "question": "如何查看快递物流信息？",
     "answer": "进入订单详情，点击【查看物流】即可追踪实时位置。",
     "category": "物流查询",
     "keywords": [
+      "快递",
+      "物流",
       "查看物流",
-      "快递追踪",
       "订单详情",
-      "物流信息"
+      "追踪"
     ],
     "source": "conversation_sess_005",
     "confidence": 0.95
@@ -68,7 +69,7 @@
   {
     "question": "可以指定快递公司吗？",
     "answer": "暂不支持指定快递，我们会为您选择最优配送服务。",
-    "category": "物流配送",
+    "category": "配送与物流",
     "keywords": [
       "指定快递",
       "快递公司",
@@ -92,7 +93,7 @@
   },
   {
     "question": "如何选择商品尺码？",
-    "answer": "请参考商品详情页的尺码对照表，或咨询在线客服获取帮助。",
+    "answer": "请参考商品详情页的尺码对照表，或咨询在线客服获取个性化建议。",
     "category": "尺码与选购",
     "keywords": [
       "尺码",
