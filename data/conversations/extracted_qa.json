@@ -1,15 +1,30 @@
 [
   {
-    "question": "如何退货？",
-    "answer": "签收后7天内可申请退货，请保留原包装。",
-    "category": "退货政策",
+    "question": "退款需要多久才能到账？",
+    "answer": "退货审核通过后3-5个工作日会原路退回您的支付账户。",
+    "category": "退款与退货",
     "keywords": [
-      "退货",
-      "7天",
-      "原包装",
-      "签收"
+      "退款",
+      "到账时间",
+      "退货审核",
+      "3-5个工作日",
+      "原路退回"
     ],
-    "source": "conversation_sess_001",
+    "source": "conversation_sess_002",
+    "confidence": 1.0
+  },
+  {
+    "question": "收到商品发现破损怎么办？",
+    "answer": "请在签收后24小时内拍照联系客服，我们会为您处理。",
+    "category": "售后处理",
+    "keywords": [
+      "破损",
+      "签收",
+      "24小时",
+      "拍照",
+      "客服"
+    ],
+    "source": "conversation_sess_004",
     "confidence": 0.95
   },
   {
@@ -17,33 +32,18 @@
     "answer": "进入订单详情，点击【查看物流】即可追踪实时位置。",
     "category": "物流查询",
     "keywords": [
-      "快递",
-      "物流",
-      "查看物流",
+      "查看快递",
+      "物流追踪",
       "订单详情",
-      "追踪"
+      "实时位置"
     ],
     "source": "conversation_sess_005",
-    "confidence": 0.95
-  },
-  {
-    "question": "你们支持哪些付款方式？",
-    "answer": "支持微信支付、支付宝、银行卡及数字人民币支付。",
-    "category": "支付方式",
-    "keywords": [
-      "付款方式",
-      "微信支付",
-      "支付宝",
-      "银行卡",
-      "数字人民币"
-    ],
-    "source": "conversation_sess_006",
     "confidence": 1.0
   },
   {
-    "question": "可以开发票吗？",
+    "question": "可以开具发票吗？",
     "answer": "支持增值税普通发票和专用发票，下单时填写开票信息。",
-    "category": "发票与税务",
+    "category": "发票相关",
     "keywords": [
       "发票",
       "增值税普通发票",
@@ -51,57 +51,20 @@
       "开票信息"
     ],
     "source": "conversation_sess_008",
-    "confidence": 0.95
+    "confidence": 1.0
   },
   {
-    "question": "如何取消订单？",
-    "answer": "未支付订单可自行取消，已支付订单需申请退款。",
-    "category": "订单管理",
+    "question": "如何评价已购买的商品？",
+    "answer": "确认收货后，进入订单详情页面，点击“评价”按钮即可进行晒单评价。",
+    "category": "订单操作与评价",
     "keywords": [
-      "取消订单",
-      "未支付",
-      "已支付",
-      "退款"
+      "评价",
+      "商品",
+      "确认收货",
+      "订单详情",
+      "晒单"
     ],
-    "source": "conversation_sess_011",
-    "confidence": 0.95
-  },
-  {
-    "question": "可以指定快递公司吗？",
-    "answer": "暂不支持指定快递，我们会为您选择最优配送服务。",
-    "category": "配送与物流",
-    "keywords": [
-      "指定快递",
-      "快递公司",
-      "配送服务"
-    ],
-    "source": "conversation_sess_015",
-    "confidence": 0.95
-  },
-  {
-    "question": "海外能买吗？",
-    "answer": "支持全球配送，具体运费可在结算页面查询。",
-    "category": "配送与物流",
-    "keywords": [
-      "海外",
-      "全球配送",
-      "运费",
-      "结算页面"
-    ],
-    "source": "conversation_sess_016",
-    "confidence": 0.95
-  },
-  {
-    "question": "如何选择商品尺码？",
-    "answer": "请参考商品详情页的尺码对照表，或咨询在线客服获取个性化建议。",
-    "category": "尺码与选购",
-    "keywords": [
-      "尺码",
-      "选择",
-      "尺码对照表",
-      "客服咨询"
-    ],
-    "source": "conversation_sess_018",
-    "confidence": 0.95
+    "source": "conversation_sess_020",
+    "confidence": 1.0
   }
 ]

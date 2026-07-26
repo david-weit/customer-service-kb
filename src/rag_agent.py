@@ -1,6 +1,7 @@
 """RAG Agent 模块（LangGraph + Function Calling 薄封装）。"""
 
 from typing import Optional
+from uuid import uuid4
 
 from src.agent_graph import build_agent_graph
 from src.order_api import MockOrderAPI
@@ -10,7 +11,7 @@ from .logger import logger
 
 
 class RAGAgent:
-    """基于 LangGraph Function Calling 的客服问答 Agent。"""
+    """基于 LangGraph Function Calling + Postgres Checkpointer 的客服问答 Agent。"""
 
     def __init__(
         self,
@@ -22,7 +23,7 @@ class RAGAgent:
         self.llm = llm
         self.kb = kb
         self.order_api = order_api or MockOrderAPI()
-        logger.info("初始化 RAG Agent (LangGraph + Function Calling)")
+        logger.info("初始化 RAG Agent (LangGraph + Function Calling + Checkpointer)")
         self.graph = build_agent_graph(
             llm=self.llm,
             kb=self.kb,
@@ -30,23 +31,32 @@ class RAGAgent:
             top_k=top_k,
         )
 
-    def answer(self, question: str) -> dict:
-        """回答问题：由模型决定是否调用 query_order / search_knowledge_base。"""
+    @staticmethod
+    def new_thread_id() -> str:
+        """生成新的会话 thread_id。"""
+        return str(uuid4())
+
+    def answer(self, question: str, thread_id: str = "default") -> dict:
+        """回答问题：由模型决定是否调用工具；同 thread_id 可多轮续聊。"""
         question = sanitize_text(question)
-        result = self.graph.invoke({"question": question})
+        result = self.graph.invoke(
+            {"question": question},
+            config={"configurable": {"thread_id": thread_id}},
+        )
 
         payload = {
             "question": result.get("question", question),
             "answer": result.get("answer", ""),
             "contexts": result.get("contexts") or [],
+            "thread_id": thread_id,
         }
         if "order_info" in result:
             payload["order_info"] = result.get("order_info")
         return payload
 
-    def invoke(self, question: str) -> str:
+    def invoke(self, question: str, thread_id: str = "default") -> str:
         """简化接口，直接返回回答文本。"""
-        return self.answer(question)["answer"]
+        return self.answer(question, thread_id=thread_id)["answer"]
 
 
 def create_rag_agent(llm, kb: KnowledgeBaseManager) -> RAGAgent:

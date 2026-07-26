@@ -9,6 +9,7 @@
 - **混合检索**：ChromaDB 向量检索 + BM25 关键词检索（`EnsembleRetriever` 融合），BM25 使用 jieba 中文分词
 - **多查询扩展**：将用户短查询扩展为多条客服场景问法，提升召回率
 - **RAG 问答**：基于 LangGraph + Function Calling，由模型选择工具后生成客服回复
+- **多轮会话**：Postgres Checkpointer + `thread_id`，同会话可续聊，换 thread 即新对话
 - **订单查询**：通过 `query_order` 工具查询 Mock 订单 API，再结合知识库生成回复
 - **评估模块**：支持批量测试与检索命中率统计
 - **MCP 服务**：通过 Model Context Protocol 对外暴露知识库查询接口，供 Cursor 等 AI 客户端调用
@@ -29,13 +30,17 @@ ConversationLoader ──► FAQGenerator (LLM 提取 + 去重)
 KnowledgeBaseManager (ChromaDB + BM25 混合检索)
     │
     ▼
-RAGAgent (LangGraph + Function Calling)
+RAGAgent (LangGraph + Function Calling + Checkpointer)
+    ├── prepare        (首轮写 System+Human；续聊只追加 Human)
     ├── agent          (LLM bind_tools 决定是否调工具)
     ├── tools          (query_order / search_knowledge_base)
     └── finalize       (生成最终回复)
     │
     ▼
-客服问答 / MCP 客户端
+Postgres Checkpointer（按 thread_id 持久化 messages）
+    │
+    ▼
+客服问答 / Gradio / MCP 客户端
 ```
 
 MCP 模式下，外部 AI 客户端通过 stdio 协议调用 `mcp-server/`，底层复用同一套 `RAGAgent` 与知识库。
@@ -320,6 +325,23 @@ docker compose --profile mcp up
 
 LangGraph 循环：`prepare → agent ⇄ tools → finalize`。模型在 `agent` 节点决定是否调工具；无 tool_calls 时进入 `finalize` 输出最终回复。
 
+### 多轮会话（Thread + Checkpointer）
+
+对话状态由 **PostgresSaver** 按 `thread_id` 写入 Postgres（默认库名 `checkpoints`）。
+
+| 项 | 说明 |
+|------|------|
+| 连接串 | 环境变量 `DATABASE_URL`，docker-compose 中 python 服务已注入 `postgresql://postgres:postgres@postgres:5432/checkpoints` |
+| 续聊 | 同一 `thread_id` 再次 `answer` / `invoke`，模型能看到历史 messages |
+| 新对话 | 换一个新的 `thread_id`（Gradio「新对话」按钮或 `RAGAgent.new_thread_id()`） |
+| 默认值 | 未传时使用 `"default"`；CLI/批量评估建议每次生成新 id，避免串话 |
+
+```python
+thread_id = agent.new_thread_id()
+print(agent.invoke("查一下我的订单", thread_id=thread_id))
+print(agent.invoke("订单号 ORD20260101001", thread_id=thread_id))  # 承接上一轮
+```
+
 ### 样例订单号
 
 | 订单号 | 状态 | 说明 |
@@ -341,13 +363,13 @@ LangGraph 循环：`prepare → agent ⇄ tools → finalize`。模型在 `agent
 
 ## 检索流程说明
 
-用户提问后，由 LangGraph + Function Calling 处理：
+用户提问后，由 LangGraph + Function Calling 处理（同 `thread_id` 会从 Checkpointer 恢复历史）：
 
-1. **prepare**：写入 system / human 消息
+1. **prepare**：无历史则写 System+Human；有历史则只追加本轮 Human
 2. **agent**：LLM（`bind_tools`）决定直接回答或调用工具
 3. **tools**：执行 `query_order` / `search_knowledge_base`（后者含多查询扩展与混合检索）
 4. **循环**：工具结果回写消息后再次进入 agent，直到不再调用工具
-5. **finalize**：提取最终自然语言回复
+5. **finalize**：提取最终自然语言回复，checkpoint 写入 Postgres
 
 ## 数据格式说明
 
@@ -408,7 +430,7 @@ from src.rag_agent import create_rag_agent
 load_dotenv()
 
 llm = init_chat_model(
-    model="deepseek-chat",
+    model="deepseek-v4-flash",
     model_provider="openai",
     api_key=os.getenv("DEEPSEEK_API_KEY"),
     base_url="https://api.deepseek.com/v1",
@@ -428,7 +450,8 @@ kb.add_faqs([
 ])
 
 agent = create_rag_agent(llm, kb)
-result = agent.answer("物流")
+thread_id = agent.new_thread_id()
+result = agent.answer("物流", thread_id=thread_id)
 print(result["answer"])
 ```
 
@@ -452,6 +475,7 @@ evaluator.save_results(results)
 
 - [LangChain](https://python.langchain.com/) — LLM 编排与结构化输出
 - [LangGraph](https://langchain-ai.github.io/langgraph/) — 客服问答状态图与 Function Calling 工具循环
+- [langgraph-checkpoint-postgres](https://pypi.org/project/langgraph-checkpoint-postgres/) — Postgres Checkpointer 多轮会话
 - [ChromaDB](https://www.trychroma.com/) — 向量数据库
 - [sentence-transformers](https://www.sbert.net/) — 本地文本 Embedding
 - [rank-bm25](https://github.com/dorianbrown/rank_bm25) + [jieba](https://github.com/fxsjy/jieba) — BM25 关键词检索与中文分词

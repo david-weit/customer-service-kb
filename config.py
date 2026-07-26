@@ -1,5 +1,6 @@
 """项目配置文件。"""
 
+import os
 from pathlib import Path
 
 # 项目根目录
@@ -30,10 +31,17 @@ DEFAULT_TEST_PATH = EXTRACTED_QA_PATH
 CHROMA_DB_DIR = BASE_DIR / "chroma_db"
 COLLECTION_NAME = "customer_service_kb"
 
+# LangGraph Checkpointer（Postgres）
+# docker-compose 中 python 服务会注入 DATABASE_URL；宿主机调试可改成 localhost
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres:postgres@postgres:5432/checkpoints",
+)
+
 # 模型配置
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_MODEL_LOCAL = "sentence-transformers/all-MiniLM-L6-v2"
-LLM_MODEL = "gpt-4o-mini"
+LLM_MODEL = "deepseek-v4-flash"
 
 # 分块配置
 CHUNK_SIZE = 500

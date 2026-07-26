@@ -5,8 +5,11 @@ from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 import config
 from src.order_api import MockOrderAPI
@@ -31,6 +34,9 @@ SYSTEM_PROMPT = """你是专业的电商客服助手，必须通过工具获取�
 - 工具返回无结果时，诚实告知并建议联系人工客服。
 """
 
+# 进程内复用连接池，避免每次建图都新建池
+_POOL: Optional[ConnectionPool] = None
+
 
 class AgentState(TypedDict, total=False):
     messages: Annotated[List[BaseMessage], add_messages]
@@ -41,13 +47,28 @@ class AgentState(TypedDict, total=False):
     answer: str
 
 
+def _get_checkpointer() -> PostgresSaver:
+    """创建（或复用）Postgres Checkpointer，并确保表已建好。"""
+    global _POOL
+    if _POOL is None:
+        _POOL = ConnectionPool(
+            conninfo=config.DATABASE_URL,
+            max_size=10,
+            kwargs={"autocommit": True, "row_factory": dict_row},
+        )
+        _POOL.open()
+    checkpointer = PostgresSaver(_POOL)
+    checkpointer.setup()  # 创建表
+    return checkpointer
+
+
 def build_agent_graph(
     llm,
     kb: KnowledgeBaseManager,
     order_api: Optional[MockOrderAPI] = None,
     top_k: Optional[int] = None,
 ):
-    """编译基于 Function Calling 的客服问答图。"""
+    """编译基于 Function Calling + Postgres Checkpointer 的客服问答图。"""
     order_api = order_api or MockOrderAPI()
     top_k = top_k or config.TOP_K
     query_expander = QueryExpander(llm)
@@ -73,19 +94,27 @@ def build_agent_graph(
     llm_with_tools = llm.bind_tools(tools)
 
     def node_prepare(state: AgentState) -> Dict[str, Any]:
+        """准备本轮输入：有历史则追加 Human，无历史则写入 System+Human。"""
         question = sanitize_text(state.get("question", ""))
         side_channel["order_info"] = None
         side_channel["docs"] = []
-        return {
+
+        updates: Dict[str, Any] = {
             "question": question,
             "tool_rounds": 0,
             "order_info": None,
             "contexts": [],
-            "messages": [
+        }
+
+        existing = state.get("messages") or []
+        if not existing:
+            updates["messages"] = [
                 SystemMessage(content=SYSTEM_PROMPT),
                 HumanMessage(content=question),
-            ],
-        }
+            ]
+        else:
+            updates["messages"] = [HumanMessage(content=question)]
+        return updates
 
     def node_agent(state: AgentState) -> Dict[str, Any]:
         response = llm_with_tools.invoke(state["messages"])
@@ -186,4 +215,4 @@ def build_agent_graph(
     graph.add_edge("tools", "agent")
     graph.add_edge("finalize", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=_get_checkpointer())

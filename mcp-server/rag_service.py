@@ -31,7 +31,7 @@ class RAGService:
         
         # 1. 初始化LLM（使用主项目配置）
         self.llm = init_chat_model(
-            model="deepseek-chat",
+            model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
             model_provider="openai",
             api_key=os.getenv("DEEPSEEK_API_KEY"),
             base_url="https://api.deepseek.com/v1",
@@ -57,7 +57,9 @@ class RAGService:
             str: RAG系统返回的答案
         """
         try:
-            response = self.agent.invoke(question)
+            response = self.agent.invoke(
+                question, thread_id=self.agent.new_thread_id()
+            )
             return response
         except Exception as e:
             return f"❌ 查询失败: {str(e)}"

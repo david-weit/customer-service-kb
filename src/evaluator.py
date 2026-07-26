@@ -24,7 +24,10 @@ class Evaluator:
 
     def evaluate_single(self, question: str, expected_answer: str = "") -> dict:
         """评估单个问答。"""
-        result = self.rag_agent.answer(question)
+        # 每题独立 thread，避免 Checkpointer 跨题串话
+        result = self.rag_agent.answer(
+            question, thread_id=self.rag_agent.new_thread_id()
+        )
         return {
             "question": question,
             "expected": expected_answer,
