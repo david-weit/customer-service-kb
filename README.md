@@ -10,6 +10,8 @@
 - **多查询扩展**：将用户短查询扩展为多条客服场景问法，提升召回率
 - **RAG 问答**：基于 LangGraph + Function Calling，由模型选择工具后生成客服回复
 - **多轮会话**：Postgres Checkpointer + `thread_id`，同会话可续聊，换 thread 即新对话
+- **上下文管理**：滑动窗口保留最近 10 条消息，更早内容压缩为 LLM 摘要并写回 Checkpointer
+- **完整历史双写**：业务表 `conversation_messages` 与 Checkpointer 同库，永久保存完整对话（含 Tool），压缩不删业务表
 - **订单查询**：通过 `query_order` 工具查询 Mock 订单 API，再结合知识库生成回复
 - **评估模块**：支持批量测试与检索命中率统计
 - **MCP 服务**：通过 Model Context Protocol 对外暴露知识库查询接口，供 Cursor 等 AI 客户端调用
@@ -31,13 +33,16 @@ KnowledgeBaseManager (ChromaDB + BM25 混合检索)
     │
     ▼
 RAGAgent (LangGraph + Function Calling + Checkpointer)
-    ├── prepare        (首轮写 System+Human；续聊只追加 Human)
-    ├── agent          (LLM bind_tools 决定是否调工具)
-    ├── tools          (query_order / search_knowledge_base)
-    └── finalize       (生成最终回复)
+    ├── prepare         (首轮写 System+Human；续聊只追加 Human；双写业务表)
+    ├── manage_context  (超窗时滑动窗口 + 摘要压缩，RemoveMessage 仅裁剪 Checkpointer)
+    ├── agent           (LLM bind_tools 决定是否调工具；双写业务表)
+    ├── tools           (query_order / search_knowledge_base；双写业务表)
+    └── finalize        (生成最终回复)
     │
     ▼
-Postgres Checkpointer（按 thread_id 持久化 messages）
+同一 Postgres 库（checkpoints）
+    ├── LangGraph Checkpointer（短上下文：System + 摘要 + 最近窗口）
+    └── conversation_messages（完整对话历史，压缩不删除）
     │
     ▼
 客服问答 / Gradio / MCP 客户端
@@ -70,8 +75,10 @@ customer-service-kb/
 │   ├── intent.py           # 订单意图规则（可选辅助；主路径已改为 Function Calling）
 │   ├── order_api.py        # Mock 订单查询 API
 │   ├── tools.py            # Function Calling 工具定义
-│   ├── agent_graph.py      # LangGraph：agent ↔ tools 循环
-│   ├── rag_agent.py        # RAG Agent 薄封装
+│   ├── context_manager.py  # 滑动窗口 + 摘要压缩
+│   ├── message_store.py    # 自建 conversation_messages 完整历史
+│   ├── agent_graph.py      # LangGraph：prepare → manage_context → agent ↔ tools
+│   ├── rag_agent.py        # RAG Agent 薄封装（含 get_history）
 │   ├── evaluator.py        # 批量评估
 │   ├── logger.py           # 日志
 │   └── utils.py            # 通用工具函数
@@ -323,23 +330,28 @@ docker compose --profile mcp up
 | `query_order` | 查询 Mock 订单物流状态（需订单号） |
 | `search_knowledge_base` | 多查询扩展 + 混合检索知识库 |
 
-LangGraph 循环：`prepare → agent ⇄ tools → finalize`。模型在 `agent` 节点决定是否调工具；无 tool_calls 时进入 `finalize` 输出最终回复。
+LangGraph 循环：`prepare → manage_context → agent ⇄ tools → finalize`。模型在 `agent` 节点决定是否调工具；无 tool_calls 时进入 `finalize` 输出最终回复。
+
+超窗时 `manage_context` 将按批次压缩最旧消息：非 System/摘要消息超过 `CONTEXT_WINDOW_SIZE`（默认 20）时，仅压缩最旧 10 条为一条 `【对话摘要】` System 消息；若窗口起点落在 `ToolMessage`，会向前补齐对应的带 `tool_calls` 的 `AIMessage`。压缩只作用于 Checkpointer 状态，**不删除**业务表中的历史行。
 
 ### 多轮会话（Thread + Checkpointer）
 
-对话状态由 **PostgresSaver** 按 `thread_id` 写入 Postgres（默认库名 `checkpoints`）。
+对话状态由 **PostgresSaver** 按 `thread_id` 写入 Postgres（默认库名 `checkpoints`）。同一库内另建业务表 `conversation_messages` 双写完整历史（不改动 LangGraph 框架表结构）。
 
 | 项 | 说明 |
 |------|------|
 | 连接串 | 环境变量 `DATABASE_URL`，docker-compose 中 python 服务已注入 `postgresql://postgres:postgres@postgres:5432/checkpoints` |
 | 续聊 | 同一 `thread_id` 再次 `answer` / `invoke`，模型能看到历史 messages |
 | 新对话 | 换一个新的 `thread_id`（Gradio「新对话」按钮或 `RAGAgent.new_thread_id()`） |
+| 上下文 | 非 System/摘要消息超过 `CONTEXT_WINDOW_SIZE`（默认 20）时，按批次压缩最旧 10 条并写回 Checkpointer |
+| 完整历史 | `conversation_messages` 按 `thread_id` 追加 Human/AI/Tool/摘要；`agent.get_history(thread_id)` 读取 |
 | 默认值 | 未传时使用 `"default"`；CLI/批量评估建议每次生成新 id，避免串话 |
 
 ```python
 thread_id = agent.new_thread_id()
 print(agent.invoke("查一下我的订单", thread_id=thread_id))
 print(agent.invoke("订单号 ORD20260101001", thread_id=thread_id))  # 承接上一轮
+history = agent.get_history(thread_id)  # 完整历史（不受窗口裁剪）
 ```
 
 ### 样例订单号
@@ -365,8 +377,9 @@ print(agent.invoke("订单号 ORD20260101001", thread_id=thread_id))  # 承接�
 
 用户提问后，由 LangGraph + Function Calling 处理（同 `thread_id` 会从 Checkpointer 恢复历史）：
 
-1. **prepare**：无历史则写 System+Human；有历史则只追加本轮 Human
-2. **agent**：LLM（`bind_tools`）决定直接回答或调用工具
+1. **prepare**：无历史则写 System+Human；有历史则只追加本轮 Human；同时双写 `conversation_messages`
+2. **manage_context**：对话消息超过滑动窗口时，旧消息压缩为摘要并 Remove 写回 Checkpointer（业务表保留旧消息并追加摘要行）
+3. **agent**：LLM（`bind_tools`）决定直接回答或调用工具；双写 AIMessage
 3. **tools**：执行 `query_order` / `search_knowledge_base`（后者含多查询扩展与混合检索）
 4. **循环**：工具结果回写消息后再次进入 agent，直到不再调用工具
 5. **finalize**：提取最终自然语言回复，checkpoint 写入 Postgres

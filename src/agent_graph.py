@@ -5,13 +5,16 @@ from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.message import add_messages
+from langgraph.graph.message import RemoveMessage, add_messages
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-import config
+import config as app_config
+from src.context_manager import ensure_message_id, trim_with_summary
+from src.message_store import append_messages, ensure_schema
 from src.order_api import MockOrderAPI
 from src.query_expansion import QueryExpander
 from src.tools import _docs_to_contexts, create_agent_tools
@@ -47,18 +50,42 @@ class AgentState(TypedDict, total=False):
     answer: str
 
 
+def _thread_id_from_config(config: Optional[RunnableConfig]) -> str:
+    if not config:
+        return "default"
+    configurable = config.get("configurable") or {}
+    return str(configurable.get("thread_id") or "default")
+
+
+def _persist(thread_id: str, messages: List[BaseMessage]) -> None:
+    """双写到业务表；池未就绪时跳过。"""
+    if _POOL is None or not messages:
+        return
+    for msg in messages:
+        ensure_message_id(msg)
+    append_messages(_POOL, thread_id, messages)
+
+
+def get_db_pool() -> ConnectionPool:
+    """确保连接池与业务表已就绪，供历史查询等复用。"""
+    _get_checkpointer()
+    assert _POOL is not None
+    return _POOL
+
+
 def _get_checkpointer() -> PostgresSaver:
     """创建（或复用）Postgres Checkpointer，并确保表已建好。"""
     global _POOL
     if _POOL is None:
         _POOL = ConnectionPool(
-            conninfo=config.DATABASE_URL,
+            conninfo=app_config.DATABASE_URL,
             max_size=10,
             kwargs={"autocommit": True, "row_factory": dict_row},
         )
         _POOL.open()
     checkpointer = PostgresSaver(_POOL)
-    checkpointer.setup()  # 创建表
+    checkpointer.setup()  # LangGraph 框架表
+    ensure_schema(_POOL)  # 业务完整历史表
     return checkpointer
 
 
@@ -70,7 +97,7 @@ def build_agent_graph(
 ):
     """编译基于 Function Calling + Postgres Checkpointer 的客服问答图。"""
     order_api = order_api or MockOrderAPI()
-    top_k = top_k or config.TOP_K
+    top_k = top_k or app_config.TOP_K
     query_expander = QueryExpander(llm)
 
     # 用可变容器让工具回调写入本轮状态侧车数据
@@ -93,11 +120,14 @@ def build_agent_graph(
     tools_by_name = {t.name: t for t in tools}
     llm_with_tools = llm.bind_tools(tools)
 
-    def node_prepare(state: AgentState) -> Dict[str, Any]:
+    def node_prepare(
+        state: AgentState, config: RunnableConfig
+    ) -> Dict[str, Any]:
         """准备本轮输入：有历史则追加 Human，无历史则写入 System+Human。"""
         question = sanitize_text(state.get("question", ""))
         side_channel["order_info"] = None
         side_channel["docs"] = []
+        thread_id = _thread_id_from_config(config)
 
         updates: Dict[str, Any] = {
             "question": question,
@@ -108,19 +138,41 @@ def build_agent_graph(
 
         existing = state.get("messages") or []
         if not existing:
-            updates["messages"] = [
+            new_msgs: List[BaseMessage] = [
                 SystemMessage(content=SYSTEM_PROMPT),
                 HumanMessage(content=question),
             ]
         else:
-            updates["messages"] = [HumanMessage(content=question)]
+            new_msgs = [HumanMessage(content=question)]
+        updates["messages"] = new_msgs
+        _persist(thread_id, new_msgs)
         return updates
 
-    def node_agent(state: AgentState) -> Dict[str, Any]:
+    def node_manage_context(
+        state: AgentState, config: RunnableConfig
+    ) -> Dict[str, Any]:
+        """超窗时压缩旧消息为摘要，并用 RemoveMessage 写回 Checkpointer。"""
+        result = trim_with_summary(
+            llm, state.get("messages") or [], app_config.CONTEXT_WINDOW_SIZE
+        )
+        if result is None:
+            return {}
+        ensure_message_id(result.summary_msg)
+        _persist(_thread_id_from_config(config), [result.summary_msg])
+        return {
+            "messages": [
+                RemoveMessage(id=i) for i in result.delete_ids
+            ]
+            + [result.summary_msg],
+        }
+
+    def node_agent(state: AgentState, config: RunnableConfig) -> Dict[str, Any]:
         response = llm_with_tools.invoke(state["messages"])
+        ensure_message_id(response)
+        _persist(_thread_id_from_config(config), [response])
         return {"messages": [response]}
 
-    def node_tools(state: AgentState) -> Dict[str, Any]:
+    def node_tools(state: AgentState, config: RunnableConfig) -> Dict[str, Any]:
         last = state["messages"][-1]
         tool_calls = getattr(last, "tool_calls", None) or []
         tool_messages: List[ToolMessage] = []
@@ -146,6 +198,10 @@ def build_agent_graph(
             tool_messages.append(
                 ToolMessage(content=sanitize_text(content), tool_call_id=call_id)
             )
+
+        for msg in tool_messages:
+            ensure_message_id(msg)
+        _persist(_thread_id_from_config(config), tool_messages)
 
         updates: Dict[str, Any] = {
             "messages": tool_messages,
@@ -199,14 +255,16 @@ def build_agent_graph(
             updates["order_info"] = side_channel["order_info"]
         return updates
 
-    graph = StateGraph(AgentState)
+    graph = StateGraph[AgentState, None, AgentState, AgentState](AgentState)
     graph.add_node("prepare", node_prepare)
+    graph.add_node("manage_context", node_manage_context)
     graph.add_node("agent", node_agent)
     graph.add_node("tools", node_tools)
     graph.add_node("finalize", node_finalize)
 
     graph.add_edge(START, "prepare")
-    graph.add_edge("prepare", "agent")
+    graph.add_edge("prepare", "manage_context")
+    graph.add_edge("manage_context", "agent")
     graph.add_conditional_edges(
         "agent",
         route_after_agent,

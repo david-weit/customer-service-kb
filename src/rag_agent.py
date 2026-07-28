@@ -1,9 +1,10 @@
 """RAG Agent 模块（LangGraph + Function Calling 薄封装）。"""
 
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from src.agent_graph import build_agent_graph
+from src.agent_graph import build_agent_graph, get_db_pool
+from src.message_store import list_messages
 from src.order_api import MockOrderAPI
 from src.utils import sanitize_text
 from src.vector_store import KnowledgeBaseManager
@@ -57,6 +58,10 @@ class RAGAgent:
     def invoke(self, question: str, thread_id: str = "default") -> str:
         """简化接口，直接返回回答文本。"""
         return self.answer(question, thread_id=thread_id)["answer"]
+
+    def get_history(self, thread_id: str) -> List[Dict[str, Any]]:
+        """读取自建表中的完整对话历史（不受 Checkpointer 窗口裁剪影响）。"""
+        return list_messages(get_db_pool(), thread_id)
 
 
 def create_rag_agent(llm, kb: KnowledgeBaseManager) -> RAGAgent:

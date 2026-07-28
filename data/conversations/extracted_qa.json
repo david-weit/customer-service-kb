@@ -1,70 +1,28 @@
 [
   {
-    "question": "退款需要多久才能到账？",
-    "answer": "退货审核通过后3-5个工作日会原路退回您的支付账户。",
-    "category": "退款与退货",
+    "question": "收货地址填错了能修改吗？",
+    "answer": "订单未发货前可在APP订单详情页自行修改地址。",
+    "category": "订单修改",
     "keywords": [
-      "退款",
-      "到账时间",
-      "退货审核",
-      "3-5个工作日",
-      "原路退回"
+      "收货地址",
+      "修改地址",
+      "未发货",
+      "APP订单详情"
     ],
-    "source": "conversation_sess_002",
+    "source": "conversation_sess_003",
     "confidence": 1.0
   },
   {
-    "question": "收到商品发现破损怎么办？",
-    "answer": "请在签收后24小时内拍照联系客服，我们会为您处理。",
-    "category": "售后处理",
+    "question": "下单后多久发货？",
+    "answer": "现货商品24小时内发货，预售商品按页面标注时间。",
+    "category": "物流与发货",
     "keywords": [
-      "破损",
-      "签收",
-      "24小时",
-      "拍照",
-      "客服"
+      "发货时间",
+      "现货",
+      "预售",
+      "24小时"
     ],
-    "source": "conversation_sess_004",
-    "confidence": 0.95
-  },
-  {
-    "question": "如何查看快递物流信息？",
-    "answer": "进入订单详情，点击【查看物流】即可追踪实时位置。",
-    "category": "物流查询",
-    "keywords": [
-      "查看快递",
-      "物流追踪",
-      "订单详情",
-      "实时位置"
-    ],
-    "source": "conversation_sess_005",
-    "confidence": 1.0
-  },
-  {
-    "question": "可以开具发票吗？",
-    "answer": "支持增值税普通发票和专用发票，下单时填写开票信息。",
-    "category": "发票相关",
-    "keywords": [
-      "发票",
-      "增值税普通发票",
-      "增值税专用发票",
-      "开票信息"
-    ],
-    "source": "conversation_sess_008",
-    "confidence": 1.0
-  },
-  {
-    "question": "如何评价已购买的商品？",
-    "answer": "确认收货后，进入订单详情页面，点击“评价”按钮即可进行晒单评价。",
-    "category": "订单操作与评价",
-    "keywords": [
-      "评价",
-      "商品",
-      "确认收货",
-      "订单详情",
-      "晒单"
-    ],
-    "source": "conversation_sess_020",
+    "source": "conversation_sess_007",
     "confidence": 1.0
   }
 ]
