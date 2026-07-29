@@ -35,3 +35,4 @@
 2026-07-25 09:49:17,337 - cs_ai - INFO - rag_agent.py:26 - 初始化 RAG Agent (LangGraph + Function Calling + Checkpointer)
 2026-07-25 09:52:03,042 - cs_ai - INFO - rag_agent.py:26 - 初始化 RAG Agent (LangGraph + Function Calling + Checkpointer)
 2026-07-25 09:55:16,337 - cs_ai - INFO - rag_agent.py:26 - 初始化 RAG Agent (LangGraph + Function Calling + Checkpointer)
+2026-07-28 06:59:28,142 - cs_ai - INFO - rag_agent.py:27 - 初始化 RAG Agent (LangGraph + Function Calling + Checkpointer)
