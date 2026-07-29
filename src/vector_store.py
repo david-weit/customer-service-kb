@@ -4,10 +4,18 @@ from langchain_core.documents import Document
 from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_milvus import Milvus
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pymilvus import MilvusClient
 
 import config
 from src.utils import sanitize_text
+
+# Milvus collection 字段在首次插入时固定；FAQ/文档共用同一组标量字段。
+_CANONICAL_META_KEYS = ("type", "category", "keywords", "source")
+
+
+def _normalize_metadata(meta: Optional[Dict]) -> Dict[str, str]:
+    """补齐 canonical 字段，避免 Insert missed an field。"""
+    meta = meta or {}
+    return {key: str(meta.get(key, "") or "") for key in _CANONICAL_META_KEYS}
 
 
 class KnowledgeBaseManager:
@@ -47,6 +55,16 @@ class KnowledgeBaseManager:
         )
         print("✅ 混合检索器创建完成")
 
+    def _close_vectorstore(self) -> None:
+        """关闭现有连接，释放 Milvus Lite 文件锁。"""
+        if self.vectorstore is None:
+            return
+        try:
+            self.vectorstore.client.close()
+        except Exception:
+            pass
+        self.vectorstore = None
+
     def _load_or_create(self):
         """加载或创建向量库。"""
         self.vectorstore = Milvus(
@@ -61,12 +79,13 @@ class KnowledgeBaseManager:
     def reset_collection(self) -> None:
         """清空向量库 collection，重置文档与混合检索器。"""
         try:
-            client = MilvusClient(uri=self.uri)
-            if client.has_collection(self.collection_name):
-                client.drop_collection(self.collection_name)
-            client.close()
+            if self.vectorstore is not None:
+                client = self.vectorstore.client
+                if client.has_collection(self.collection_name):
+                    client.drop_collection(self.collection_name)
         except Exception:
             pass
+        self._close_vectorstore()
         self.documents = []
         self.hybrid_retriever = None
         self._load_or_create()
@@ -102,6 +121,9 @@ class KnowledgeBaseManager:
             for chunk in ready:
                 chunk.metadata.update(metadata)
 
+        for chunk in ready:
+            chunk.metadata = _normalize_metadata(chunk.metadata)
+
         if not ready:
             print("⚠️ 没有可入库的文档块")
             return
@@ -123,12 +145,14 @@ class KnowledgeBaseManager:
             docs.append(
                 Document(
                     page_content=content,
-                    metadata={
-                        "type": "faq",
-                        "category": faq.get("category", ""),
-                        "keywords": ",".join(faq.get("keywords", [])),
-                        "source": faq.get("source", ""),
-                    },
+                    metadata=_normalize_metadata(
+                        {
+                            "type": "faq",
+                            "category": faq.get("category", ""),
+                            "keywords": ",".join(faq.get("keywords", [])),
+                            "source": faq.get("source", ""),
+                        }
+                    ),
                 )
             )
 
@@ -151,14 +175,12 @@ class KnowledgeBaseManager:
 
     def get_collection_stats(self):
         """获取向量库统计信息。"""
-        client = MilvusClient(uri=self.uri)
-        try:
-            total = 0
+        total = 0
+        if self.vectorstore is not None:
+            client = self.vectorstore.client
             if client.has_collection(self.collection_name):
                 stats = client.get_collection_stats(self.collection_name)
                 total = int(stats.get("row_count", 0))
-        finally:
-            client.close()
         return {
             "total_documents": total,
             "collection_name": self.collection_name,

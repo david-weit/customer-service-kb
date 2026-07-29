@@ -1,5 +1,7 @@
 # customer-service-kb
 
+![AI 客服知识库问答界面](docs/gradio-demo.png)
+
 基于 RAG（检索增强生成）的 AI 客服知识库系统。从历史客服对话中自动提取 FAQ，构建混合检索知识库，并通过大语言模型实现智能问答。
 
 ## 功能特性
