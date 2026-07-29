@@ -6,7 +6,7 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data
-      - ./chroma_db:/app/chroma_db
+      - ./milvus_data:/app/milvus_data
       - ./logs:/app/logs
       - hf_cache:/app/.cache/huggingface
     command: python main.py
@@ -16,7 +16,7 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data
-      - ./chroma_db:/app/chroma_db
+      - ./milvus_data:/app/milvus_data
       - ./logs:/app/logs
       - hf_cache:/app/.cache/huggingface
     working_dir: /app/mcp-server

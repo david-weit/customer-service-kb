@@ -6,7 +6,7 @@
 
 - **对话加载**：支持 JSON、CSV 及旧版 `raw_logs.csv` 格式，无数据时自动生成示例对话
 - **FAQ 自动生成**：使用 LLM 从客服对话中提取、标准化问答对，并支持去重
-- **混合检索**：ChromaDB 向量检索 + BM25 关键词检索（`EnsembleRetriever` 融合），BM25 使用 jieba 中文分词
+- **混合检索**：Milvus 向量检索 + BM25 关键词检索（`EnsembleRetriever` 融合），BM25 使用 jieba 中文分词
 - **多查询扩展**：将用户短查询扩展为多条客服场景问法，提升召回率
 - **RAG 问答**：基于 LangGraph + Function Calling，由模型选择工具后生成客服回复
 - **多轮会话**：Postgres Checkpointer + `thread_id`，同会话可续聊，换 thread 即新对话
@@ -29,7 +29,7 @@ ConversationLoader ──► FAQGenerator (LLM 提取 + 去重)
     │                  extracted_qa.csv / .json
     │                        │
     ▼                        ▼
-KnowledgeBaseManager (ChromaDB + BM25 混合检索)
+KnowledgeBaseManager (Milvus Lite + BM25 混合检索)
     │
     ▼
 RAGAgent (LangGraph + Function Calling + Checkpointer)
@@ -69,7 +69,7 @@ customer-service-kb/
 ├── src/
 │   ├── data_loader.py      # 对话数据加载
 │   ├── faq_generator.py    # FAQ 提取与导出
-│   ├── vector_store.py     # ChromaDB 向量库与混合检索管理
+│   ├── vector_store.py     # Milvus 向量库与混合检索管理
 │   ├── hybrid_retriever.py # BM25 + 向量混合检索
 │   ├── query_expansion.py  # 多查询扩展
 │   ├── intent.py           # 订单意图规则（可选辅助；主路径已改为 Function Calling）
@@ -90,7 +90,7 @@ customer-service-kb/
 │   └── requirements.txt    # MCP 额外依赖
 ├── logs/                   # 运行日志（自动生成）
 ├── docker-compose.yml      # Docker 编排（含 app / mcp 服务）
-└── chroma_db/              # 向量库持久化目录（运行后自动生成）
+└── milvus_data/            # Milvus Lite 持久化目录（运行后自动生成）
 ```
 
 ## 环境要求
@@ -143,7 +143,7 @@ python main.py
 
 1. 加载历史对话
 2. 使用 LLM 提取并去重 FAQ，导出到 `data/conversations/extracted_qa.csv` 和 `.json`
-3. 重置 ChromaDB 向量库，将 FAQ 写入并构建混合检索器
+3. 将 FAQ 写入 Milvus 向量库并构建混合检索器
 4. 进入交互式问答模式（输入 `exit` 退出）
 
 问答时会打印扩展查询与召回文档摘要，便于调试检索效果。
@@ -250,7 +250,7 @@ rag_service.py → RAGAgent + KnowledgeBaseManager（复用 src/）
 
 ### 本地启动
 
-先确保主项目依赖与知识库已就绪（`chroma_db/` 中有 FAQ 数据，`.env` 已配置 `DEEPSEEK_API_KEY`）：
+先确保主项目依赖与知识库已就绪（`milvus_data/` 中有 FAQ 数据，`.env` 已配置 `DEEPSEEK_API_KEY`）：
 
 ```bash
 # 安装 MCP 额外依赖
@@ -288,11 +288,11 @@ docker compose --profile mcp up
 | `app` | 运行 `python main.py` 交互问答 |
 | `mcp` | 运行 `python server.py` MCP 服务 |
 
-两个服务共享 `data/`、`chroma_db/`、`logs/` 卷与 `.env` 配置。
+两个服务共享 `data/`、`milvus_data/`、`logs/` 卷与 `.env` 配置。
 
 ### 容器启动自动补依赖
 
-镜像内置 `docker/entrypoint.sh`。容器每次启动时会先检查关键依赖（`sentence_transformers`、`langchain`、`chromadb`）是否可导入：
+镜像内置 `docker/entrypoint.sh`。容器每次启动时会先检查关键依赖（`sentence_transformers`、`langchain`、`pymilvus`、`langchain_milvus`）是否可导入：
 
 - 依赖齐全：直接启动目标命令
 - 依赖缺失：自动执行 `pip install -r /app/requirements.txt -r /app/mcp-server/requirements.txt` 后再启动
@@ -418,6 +418,8 @@ history = agent.get_history(thread_id)  # 完整历史（不受窗口裁剪）
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
+| `MILVUS_URI` | `milvus_data/kb.db`（可用环境变量覆盖） | Milvus 连接 URI；本地文件走 Lite，`http://host:19530` 走 Standalone |
+| `COLLECTION_NAME` | `customer_service_kb` | Milvus collection 名称 |
 | `EMBEDDING_MODEL_LOCAL` | `sentence-transformers/all-MiniLM-L6-v2` | 本地 Embedding 模型 |
 | `CHUNK_SIZE` | `500` | 文档分块大小 |
 | `CHUNK_OVERLAP` | `50` | 分块重叠长度 |
@@ -489,7 +491,7 @@ evaluator.save_results(results)
 - [LangChain](https://python.langchain.com/) — LLM 编排与结构化输出
 - [LangGraph](https://langchain-ai.github.io/langgraph/) — 客服问答状态图与 Function Calling 工具循环
 - [langgraph-checkpoint-postgres](https://pypi.org/project/langgraph-checkpoint-postgres/) — Postgres Checkpointer 多轮会话
-- [ChromaDB](https://www.trychroma.com/) — 向量数据库
+- [Milvus](https://milvus.io/) / [Milvus Lite](https://milvus.io/docs/milvus_lite.md) — 向量数据库（经 langchain-milvus）
 - [sentence-transformers](https://www.sbert.net/) — 本地文本 Embedding
 - [rank-bm25](https://github.com/dorianbrown/rank_bm25) + [jieba](https://github.com/fxsjy/jieba) — BM25 关键词检索与中文分词
 - [MCP SDK](https://github.com/modelcontextprotocol/python-sdk) — Model Context Protocol 服务接口

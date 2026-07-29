@@ -1,10 +1,10 @@
 from typing import Dict, List, Optional
 
-import chromadb
-from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_huggingface.embeddings import HuggingFaceEmbeddings
+from langchain_milvus import Milvus
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pymilvus import MilvusClient
 
 import config
 from src.utils import sanitize_text
@@ -13,18 +13,18 @@ from src.utils import sanitize_text
 class KnowledgeBaseManager:
     def __init__(
         self,
-        persist_dir: Optional[str] = None,
+        uri: Optional[str] = None,
         collection_name: Optional[str] = None,
     ):
-        self.persist_dir = str(persist_dir or config.CHROMA_DB_DIR)
+        self.uri = uri or config.MILVUS_URI
         self.collection_name = collection_name or config.COLLECTION_NAME
         self.embeddings = HuggingFaceEmbeddings(
             model_name=config.EMBEDDING_MODEL_LOCAL
         )
-        self.client = chromadb.PersistentClient(self.persist_dir)
         self.vectorstore = None
         self.hybrid_retriever = None
         self.documents: List[Document] = []
+        config.MILVUS_DIR.mkdir(parents=True, exist_ok=True)
         self._load_or_create()
 
     def create_hybrid_retriever(
@@ -49,17 +49,22 @@ class KnowledgeBaseManager:
 
     def _load_or_create(self):
         """加载或创建向量库。"""
-        self.vectorstore = Chroma(
-            client=self.client,
-            collection_name=self.collection_name,
+        self.vectorstore = Milvus(
             embedding_function=self.embeddings,
+            collection_name=self.collection_name,
+            connection_args={"uri": self.uri},
+            index_params={"index_type": "FLAT", "metric_type": "L2"},
+            auto_id=True,
         )
-        print(f"📂 向量库就绪: {self.collection_name}")
+        print(f"📂 向量库就绪: {self.collection_name} ({self.uri})")
 
     def reset_collection(self) -> None:
         """清空向量库 collection，重置文档与混合检索器。"""
         try:
-            self.client.delete_collection(self.collection_name)
+            client = MilvusClient(uri=self.uri)
+            if client.has_collection(self.collection_name):
+                client.drop_collection(self.collection_name)
+            client.close()
         except Exception:
             pass
         self.documents = []
@@ -146,8 +151,16 @@ class KnowledgeBaseManager:
 
     def get_collection_stats(self):
         """获取向量库统计信息。"""
-        collection = self.client.get_collection(self.collection_name)
+        client = MilvusClient(uri=self.uri)
+        try:
+            total = 0
+            if client.has_collection(self.collection_name):
+                stats = client.get_collection_stats(self.collection_name)
+                total = int(stats.get("row_count", 0))
+        finally:
+            client.close()
         return {
-            "total_documents": collection.count(),
+            "total_documents": total,
             "collection_name": self.collection_name,
+            "uri": self.uri,
         }

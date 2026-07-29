@@ -27,8 +27,9 @@ EVAL_DIR = DATA_DIR / "eval"
 EVAL_RESULTS_PATH = EVAL_DIR / "eval_results.csv"
 DEFAULT_TEST_PATH = EXTRACTED_QA_PATH
 
-# 向量数据库
-CHROMA_DB_DIR = BASE_DIR / "chroma_db"
+# 向量数据库（默认 Milvus Lite 本地文件；可设 MILVUS_URI=http://host:19530 切 Standalone）
+MILVUS_DIR = BASE_DIR / "milvus_data"
+MILVUS_URI = os.getenv("MILVUS_URI", str(MILVUS_DIR / "kb.db"))
 COLLECTION_NAME = "customer_service_kb"
 
 # LangGraph Checkpointer（Postgres）

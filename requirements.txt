@@ -1,11 +1,10 @@
-chromadb>=0.4.0
 openai>=1.0.0
 pandas>=2.0.0
 langchain>=0.1.0
 langchain-core>=0.1.42
 langchain-openai>=0.0.5
 langchain-community>=0.0.10
-langchain-chroma>=0.1.0
+langchain-milvus>=0.1.0
 langchain-huggingface>=0.0.3
 langchain-text-splitters>=0.0.1
 sentence-transformers>=2.2.0
@@ -20,3 +19,4 @@ pypdf>=4.0.0
 langgraph>=0.2.0
 langgraph-checkpoint-postgres>=2.0.0
 psycopg[binary,pool]>=3.1.0
+pymilvus[milvus-lite]>=2.4.0
