@@ -1,7 +1,7 @@
 /chroma_db/
 /chroma_db/*
 /milvus_data/*
-!/milvus_data/.gitkeep
+/milvus_data/.gitkeep
 /.venv/
 /src/__pycache__/
 **/__pycache__/
@@ -9,3 +9,4 @@
 .env
 __pycache__/*
 **/__pycache__/*
+/logs/*
