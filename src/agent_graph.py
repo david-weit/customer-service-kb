@@ -11,6 +11,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import RemoveMessage, add_messages
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
+from pydantic import BaseModel, Field
 
 import config as app_config
 from src.context_manager import ensure_message_id, trim_with_summary
@@ -22,6 +23,10 @@ from src.utils import sanitize_text
 from src.vector_store import KnowledgeBaseManager
 
 MAX_TOOL_ROUNDS = 6
+
+VERIFY_FAIL_SUFFIX = (
+    "\n\n（以上回答经自检仍可能不够准确，建议联系人工客服确认。）"
+)
 
 SYSTEM_PROMPT = """你是专业的电商客服助手，必须通过工具获取事实后再回答，不要编造订单状态或政策。
 
@@ -41,6 +46,13 @@ SYSTEM_PROMPT = """你是专业的电商客服助手，必须通过工具获取�
 _POOL: Optional[ConnectionPool] = None
 
 
+class AnswerVerdict(BaseModel):
+    """答案自检结果。"""
+
+    is_accurate: bool = Field(description="是否准确、切题地回答了用户问题")
+    reason: str = Field(description="简短判断理由")
+
+
 class AgentState(TypedDict, total=False):
     messages: Annotated[List[BaseMessage], add_messages]
     question: str
@@ -48,6 +60,9 @@ class AgentState(TypedDict, total=False):
     contexts: List[dict]
     tool_rounds: int
     answer: str
+    answer_ok: bool
+    verify_reason: str
+    verify_retries: int
 
 
 def _thread_id_from_config(config: Optional[RunnableConfig]) -> str:
@@ -64,6 +79,36 @@ def _persist(thread_id: str, messages: List[BaseMessage]) -> None:
     for msg in messages:
         ensure_message_id(msg)
     append_messages(_POOL, thread_id, messages)
+
+
+def _ai_text(content: Any) -> str:
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return str(content or "")
+
+
+def _facts_summary(state: AgentState) -> str:
+    """压缩 contexts / order_info，供自检与重写使用。"""
+    parts: List[str] = []
+    order_info = state.get("order_info")
+    if order_info:
+        parts.append("订单信息: " + json.dumps(order_info, ensure_ascii=False))
+    contexts = state.get("contexts") or []
+    if contexts:
+        snippets = []
+        for ctx in contexts[:5]:
+            text = sanitize_text(str(ctx.get("content", "")))[:200]
+            if text:
+                snippets.append(f"- {text}")
+        if snippets:
+            parts.append("知识库摘录:\n" + "\n".join(snippets))
+    return "\n".join(parts) if parts else "（无工具事实）"
 
 
 def get_db_pool() -> ConnectionPool:
@@ -119,6 +164,7 @@ def build_agent_graph(
     )
     tools_by_name = {t.name: t for t in tools}
     llm_with_tools = llm.bind_tools(tools)
+    verify_llm = llm.with_structured_output(AnswerVerdict)
 
     def node_prepare(
         state: AgentState, config: RunnableConfig
@@ -134,6 +180,9 @@ def build_agent_graph(
             "tool_rounds": 0,
             "order_info": None,
             "contexts": [],
+            "answer_ok": True,
+            "verify_reason": "",
+            "verify_retries": 0,
         }
 
         existing = state.get("messages") or []
@@ -230,17 +279,7 @@ def build_agent_graph(
                 tool_calls = getattr(msg, "tool_calls", None) or []
                 if tool_calls:
                     continue
-                content = msg.content
-                if isinstance(content, list):
-                    parts = []
-                    for block in content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            parts.append(block.get("text", ""))
-                        elif isinstance(block, str):
-                            parts.append(block)
-                    answer = "".join(parts)
-                else:
-                    answer = str(content or "")
+                answer = _ai_text(msg.content)
                 break
 
         answer = sanitize_text(answer).strip()
@@ -255,12 +294,129 @@ def build_agent_graph(
             updates["order_info"] = side_channel["order_info"]
         return updates
 
+    def node_verify(state: AgentState) -> Dict[str, Any]:
+        """LLM Judge：判断答案是否准确回应用户问题。"""
+        question = sanitize_text(state.get("question", ""))
+        answer = sanitize_text(state.get("answer", ""))
+        facts = _facts_summary(state)
+
+        prompt = f"""你是客服问答质检员。请判断「客服回答」是否准确回应用户问题。
+
+判断标准（只评对错与切题，不评文采）：
+1. 是否切题、覆盖用户核心诉求
+2. 是否与下方工具/知识库事实冲突（有事实时）
+3. 若客服合理要求补充信息（如订单号），可判为准确
+
+用户问题：
+{question}
+
+客服回答：
+{answer}
+
+已有事实：
+{facts}
+
+请输出 is_accurate 与简短 reason。"""
+
+        try:
+            verdict: AnswerVerdict = verify_llm.invoke(prompt)
+            ok = bool(verdict.is_accurate)
+            reason = sanitize_text(verdict.reason).strip()
+        except Exception as e:
+            # 自检失败时放行，避免拖垮主流程
+            return {
+                "answer_ok": True,
+                "verify_reason": f"自检跳过: {type(e).__name__}",
+            }
+
+        updates: Dict[str, Any] = {
+            "answer_ok": ok,
+            "verify_reason": reason or ("通过" if ok else "未通过"),
+        }
+        if not ok:
+            retries = int(state.get("verify_retries") or 0)
+            max_retries = max(0, int(app_config.ANSWER_VERIFY_MAX_RETRIES))
+            if retries >= max_retries:
+                # 已无重试机会：附带说明后结束
+                final = answer
+                if VERIFY_FAIL_SUFFIX.strip() not in final:
+                    final = final.rstrip() + VERIFY_FAIL_SUFFIX
+                updates["answer"] = final
+        return updates
+
+    def route_after_verify(state: AgentState) -> str:
+        if state.get("answer_ok", True):
+            return "end"
+        retries = int(state.get("verify_retries") or 0)
+        max_retries = max(0, int(app_config.ANSWER_VERIFY_MAX_RETRIES))
+        if retries < max_retries:
+            return "regenerate"
+        return "end"
+
+    def node_regenerate(
+        state: AgentState, config: RunnableConfig
+    ) -> Dict[str, Any]:
+        """未绑定工具的 LLM 根据校验反馈重写回答。"""
+        question = sanitize_text(state.get("question", ""))
+        prev_answer = sanitize_text(state.get("answer", ""))
+        reason = sanitize_text(state.get("verify_reason", ""))
+        facts = _facts_summary(state)
+        retries = int(state.get("verify_retries") or 0) + 1
+
+        rewrite_prompt = f"""上一版客服回答未通过质检，请基于已有事实重写一版简洁友好的中文回复。
+
+要求：
+- 必须切题回应用户问题
+- 只能使用已有事实，禁止编造订单状态或政策
+- 若事实不足，诚实说明并建议联系人工客服或请用户补充信息
+
+用户问题：
+{question}
+
+质检不通过原因：
+{reason}
+
+上一版回答：
+{prev_answer}
+
+已有事实：
+{facts}
+
+请直接输出重写后的客服回复正文，不要解释质检过程。"""
+
+        response = llm.invoke(
+            [
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=rewrite_prompt),
+            ]
+        )
+        new_answer = sanitize_text(_ai_text(response.content)).strip()
+        if not new_answer:
+            new_answer = prev_answer
+
+        ai_msg = AIMessage(content=new_answer)
+        ensure_message_id(ai_msg)
+        _persist(_thread_id_from_config(config), [ai_msg])
+
+        return {
+            "messages": [ai_msg],
+            "answer": new_answer,
+            "verify_retries": retries,
+        }
+
+    def route_after_finalize(state: AgentState) -> str:
+        if app_config.ANSWER_VERIFY_ENABLED:
+            return "verify"
+        return "end"
+
     graph = StateGraph[AgentState, None, AgentState, AgentState](AgentState)
     graph.add_node("prepare", node_prepare)
     graph.add_node("manage_context", node_manage_context)
     graph.add_node("agent", node_agent)
     graph.add_node("tools", node_tools)
     graph.add_node("finalize", node_finalize)
+    graph.add_node("verify", node_verify)
+    graph.add_node("regenerate", node_regenerate)
 
     graph.add_edge(START, "prepare")
     graph.add_edge("prepare", "manage_context")
@@ -271,6 +427,16 @@ def build_agent_graph(
         {"tools": "tools", "finalize": "finalize"},
     )
     graph.add_edge("tools", "agent")
-    graph.add_edge("finalize", END)
+    graph.add_conditional_edges(
+        "finalize",
+        route_after_finalize,
+        {"verify": "verify", "end": END},
+    )
+    graph.add_conditional_edges(
+        "verify",
+        route_after_verify,
+        {"regenerate": "regenerate", "end": END},
+    )
+    graph.add_edge("regenerate", "verify")
 
     return graph.compile(checkpointer=_get_checkpointer())

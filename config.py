@@ -56,3 +56,12 @@ SIMILARITY_THRESHOLD = 0.7
 
 # 上下文管理：滑动窗口（不含 System / 摘要消息）
 CONTEXT_WINDOW_SIZE = 20
+
+# 答案自检（LLM Judge）：finalize 后判断是否准确回答用户问题
+ANSWER_VERIFY_ENABLED = os.getenv("ANSWER_VERIFY_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+ANSWER_VERIFY_MAX_RETRIES = int(os.getenv("ANSWER_VERIFY_MAX_RETRIES", "1"))

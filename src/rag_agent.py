@@ -50,6 +50,8 @@ class RAGAgent:
             "answer": result.get("answer", ""),
             "contexts": result.get("contexts") or [],
             "thread_id": thread_id,
+            "answer_ok": bool(result.get("answer_ok", True)),
+            "verify_reason": result.get("verify_reason") or "",
         }
         if "order_info" in result:
             payload["order_info"] = result.get("order_info")

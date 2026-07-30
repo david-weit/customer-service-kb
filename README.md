@@ -11,6 +11,7 @@
 - **混合检索**：Milvus 向量检索 + BM25 关键词检索（`EnsembleRetriever` 融合），BM25 使用 jieba 中文分词
 - **多查询扩展**：将用户短查询扩展为多条客服场景问法，提升召回率
 - **RAG 问答**：基于 LangGraph + Function Calling，由模型选择工具后生成客服回复
+- **答案自检**：finalize 后由 LLM Judge 判断是否准确回应用户问题，不通过可重写一轮
 - **多轮会话**：Postgres Checkpointer + `thread_id`，同会话可续聊，换 thread 即新对话
 - **上下文管理**：滑动窗口保留最近 10 条消息，更早内容压缩为 LLM 摘要并写回 Checkpointer
 - **完整历史双写**：业务表 `conversation_messages` 与 Checkpointer 同库，永久保存完整对话（含 Tool），压缩不删业务表
@@ -39,7 +40,9 @@ RAGAgent (LangGraph + Function Calling + Checkpointer)
     ├── manage_context  (超窗时滑动窗口 + 摘要压缩，RemoveMessage 仅裁剪 Checkpointer)
     ├── agent           (LLM bind_tools 决定是否调工具；双写业务表)
     ├── tools           (query_order / search_knowledge_base；双写业务表)
-    └── finalize        (生成最终回复)
+    ├── finalize        (提取最终回复)
+    ├── verify          (LLM Judge：判断答案是否准确回答用户问题)
+    └── regenerate      (未通过则基于已有事实重写，最多 1 次，再回 verify)
     │
     ▼
 同一 Postgres 库（checkpoints）
@@ -79,7 +82,7 @@ customer-service-kb/
 │   ├── tools.py            # Function Calling 工具定义
 │   ├── context_manager.py  # 滑动窗口 + 摘要压缩
 │   ├── message_store.py    # 自建 conversation_messages 完整历史
-│   ├── agent_graph.py      # LangGraph：prepare → manage_context → agent ↔ tools
+│   ├── agent_graph.py      # LangGraph：prepare → … → finalize → verify（可选 regenerate）
 │   ├── rag_agent.py        # RAG Agent 薄封装（含 get_history）
 │   ├── evaluator.py        # 批量评估
 │   ├── logger.py           # 日志
@@ -332,7 +335,7 @@ docker compose --profile mcp up
 | `query_order` | 查询 Mock 订单物流状态（需订单号） |
 | `search_knowledge_base` | 多查询扩展 + 混合检索知识库 |
 
-LangGraph 循环：`prepare → manage_context → agent ⇄ tools → finalize`。模型在 `agent` 节点决定是否调工具；无 tool_calls 时进入 `finalize` 输出最终回复。
+LangGraph 循环：`prepare → manage_context → agent ⇄ tools → finalize → verify（可选 regenerate）`。模型在 `agent` 节点决定是否调工具；无 tool_calls 时进入 `finalize`，再由 LLM Judge 自检答案是否切题准确；不通过则最多重写 1 次。
 
 超窗时 `manage_context` 将按批次压缩最旧消息：非 System/摘要消息超过 `CONTEXT_WINDOW_SIZE`（默认 20）时，仅压缩最旧 10 条为一条 `【对话摘要】` System 消息；若窗口起点落在 `ToolMessage`，会向前补齐对应的带 `tool_calls` 的 `AIMessage`。压缩只作用于 Checkpointer 状态，**不删除**业务表中的历史行。
 
@@ -382,9 +385,11 @@ history = agent.get_history(thread_id)  # 完整历史（不受窗口裁剪）
 1. **prepare**：无历史则写 System+Human；有历史则只追加本轮 Human；同时双写 `conversation_messages`
 2. **manage_context**：对话消息超过滑动窗口时，旧消息压缩为摘要并 Remove 写回 Checkpointer（业务表保留旧消息并追加摘要行）
 3. **agent**：LLM（`bind_tools`）决定直接回答或调用工具；双写 AIMessage
-3. **tools**：执行 `query_order` / `search_knowledge_base`（后者含多查询扩展与混合检索）
-4. **循环**：工具结果回写消息后再次进入 agent，直到不再调用工具
-5. **finalize**：提取最终自然语言回复，checkpoint 写入 Postgres
+4. **tools**：执行 `query_order` / `search_knowledge_base`（后者含多查询扩展与混合检索）
+5. **循环**：工具结果回写消息后再次进入 agent，直到不再调用工具
+6. **finalize**：提取最终自然语言回复
+7. **verify**：LLM Judge 判断答案是否准确回应用户问题；不通过且未达重试上限则进入 regenerate
+8. **regenerate**（可选）：用未绑定工具的 LLM 基于已有事实重写回答，再回到 verify；仍不通过则附带人工客服提示
 
 ## 数据格式说明
 
@@ -429,6 +434,8 @@ history = agent.get_history(thread_id)  # 完整历史（不受窗口裁剪）
 | `EXPANDED_QUERY_K` | `2` | 扩展查询每条检索的文档数量 |
 | `MAX_RETRIEVED_DOCS` | `8` | 合并去重后送入 LLM 的最大文档数 |
 | `SIMILARITY_THRESHOLD` | `0.7` | 相似度阈值 |
+| `ANSWER_VERIFY_ENABLED` | `true`（环境变量可关） | 是否启用 finalize 后的 LLM 答案自检 |
+| `ANSWER_VERIFY_MAX_RETRIES` | `1` | 自检不通过时最多重写次数 |
 
 LLM 模型在 `main.py` 中配置，默认使用 DeepSeek Chat。
 
