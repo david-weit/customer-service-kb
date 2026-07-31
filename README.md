@@ -2,12 +2,12 @@
 
 ![AI 客服知识库问答界面](docs/gradio-demo.png)
 
-基于 RAG（检索增强生成）的 AI 客服知识库系统。从历史客服对话中自动提取 FAQ，构建混合检索知识库，并通过大语言模型实现智能问答。
+基于 RAG（检索增强生成）的 AI 客服知识库系统。通过 Gradio 导入文档、全量构建知识库，并经大语言模型实现智能问答。
 
 ## 功能特性
 
-- **对话加载**：支持 JSON、CSV 及旧版 `raw_logs.csv` 格式，无数据时自动生成示例对话
-- **FAQ 自动生成**：使用 LLM 从客服对话中提取、标准化问答对，并支持去重
+- **文档导入与全量构建**：Gradio 上传落盘到 `data/raw/uploads/`，构建时 `reset` 后全量解析入库
+- **Docling 解析**：PDF/DOCX/PPTX/HTML/图片走 Docling（版面/表格/OCR）；Excel/CSV/JSON 仍按行或结构切块
 - **混合检索**：Milvus 向量检索 + BM25 关键词检索（`EnsembleRetriever` 融合），BM25 使用 jieba 中文分词
 - **多查询扩展**：将用户短查询扩展为多条客服场景问法，提升召回率
 - **RAG 问答**：基于 LangGraph + Function Calling，由模型选择工具后生成客服回复
@@ -23,15 +23,12 @@
 ## 系统架构
 
 ```
-历史对话数据
+Gradio：导入文档（落盘 uploads）
     │
     ▼
-ConversationLoader ──► FAQGenerator (LLM 提取 + 去重)
-    │                        │
-    │                        ▼
-    │                  extracted_qa.csv / .json
-    │                        │
-    ▼                        ▼
+构建知识库（全量 reset + Docling/Excel/JSON 解析）
+    │
+    ▼
 KnowledgeBaseManager (Milvus Lite + BM25 混合检索)
     │
     ▼
@@ -59,21 +56,26 @@ MCP 模式下，外部 AI 客户端通过 stdio 协议调用 `mcp-server/`，底
 
 ```
 customer-service-kb/
-├── main.py                 # 主入口：加载对话 → 生成 FAQ → 构建知识库 → 交互问答
+├── main.py                 # 主入口：初始化空 Agent（文档入库由 Gradio 负责）
 ├── config.py               # 路径、模型、分块与 RAG 参数配置
 ├── requirements.txt        # Python 依赖
 ├── data/
-│   ├── conversations/      # 对话数据与提取结果
+│   ├── conversations/      # 对话数据与提取结果（可选）
 │   │   ├── raw_logs.csv
 │   │   ├── extracted_qa.csv
 │   │   └── extracted_qa.json
 │   ├── raw/
-│   │   └── faq_manual.csv  # 手工维护的 FAQ
+│   │   ├── faq_manual.csv  # 手工维护的 FAQ
+│   │   ├── policies/       # 政策文档
+│   │   ├── products/       # 产品文档
+│   │   └── uploads/        # Gradio 导入落盘目录
 │   └── eval/               # 评估结果（运行 --eval 后生成）
 │       └── eval_results.csv
 ├── src/
-│   ├── data_loader.py      # 对话数据加载
-│   ├── faq_generator.py    # FAQ 提取与导出
+│   ├── data_loader.py      # 对话数据加载（可选模块）
+│   ├── faq_generator.py    # FAQ 提取与导出（可选模块）
+│   ├── document_loader.py  # 文档分发：Docling / Excel / JSON
+│   ├── parsers/            # DoclingParser、ExcelParser、JsonParser
 │   ├── vector_store.py     # Milvus 向量库与混合检索管理
 │   ├── hybrid_retriever.py # BM25 + 向量混合检索
 │   ├── query_expansion.py  # 多查询扩展
@@ -126,32 +128,31 @@ export HF_ENDPOINT=https://hf-mirror.com
 DEEPSEEK_API_KEY=your_deepseek_api_key
 ```
 
-### 3. 准备对话数据（可选）
+### 3. 准备文档（推荐）
 
-将客服对话放入 `data/conversations/`，支持以下格式（按优先级加载）：
+将政策/产品文件放入 `data/raw/policies/`、`data/raw/products/`，或通过 Gradio「导入文档」落到 `data/raw/uploads/`。
 
-| 文件 | 说明 |
-|------|------|
-| `conversations.json` | JSON 格式对话 |
-| `conversations.csv` | CSV 格式，需包含 `conversation_id`、`role`、`content` 列 |
-| `raw_logs.csv` | 旧版格式，需包含 `session_id`、`user_message`、`agent_message` 列 |
+支持：pdf / docx / pptx / html / 图片（Docling），以及 xlsx / csv / json / txt / md。
 
-若不提供任何数据，程序会自动生成示例对话用于演示。
+### 4. 运行（推荐 Gradio）
 
-### 4. 运行
+```bash
+pip install -r requirements.txt   # 含 docling，首次会下载模型
+python web/gradio_app.py
+```
+
+Gradio 流程：
+
+1. **初始化 Agent**（连接 LLM + 空向量库）
+2. **导入文档**（仅落盘到 `uploads/`，不入库）
+3. **构建离线知识库**（`reset` 后全量解析入库；再次导入后需重新构建）
+4. 开始问答（同 `thread_id` 多轮续聊）
+
+也可用 CLI（不自动建库，需已通过 Gradio 构建过）：
 
 ```bash
 python main.py
 ```
-
-程序将依次执行：
-
-1. 加载历史对话
-2. 使用 LLM 提取并去重 FAQ，导出到 `data/conversations/extracted_qa.csv` 和 `.json`
-3. 将 FAQ 写入 Milvus 向量库并构建混合检索器
-4. 进入交互式问答模式（输入 `exit` 退出）
-
-问答时会打印扩展查询与召回文档摘要，便于调试检索效果。
 
 ### 5. 批量评估
 
@@ -427,6 +428,7 @@ history = agent.get_history(thread_id)  # 完整历史（不受窗口裁剪）
 |------|--------|------|
 | `MILVUS_URI` | `milvus_data/kb.db`（可用环境变量覆盖） | Milvus 连接 URI；本地文件走 Lite，`http://host:19530` 走 Standalone |
 | `COLLECTION_NAME` | `customer_service_kb` | Milvus collection 名称 |
+| `UPLOADS_DIR` | `data/raw/uploads` | Gradio 导入落盘目录 |
 | `EMBEDDING_MODEL_LOCAL` | `sentence-transformers/all-MiniLM-L6-v2` | 本地 Embedding 模型 |
 | `CHUNK_SIZE` | `500` | 文档分块大小 |
 | `CHUNK_OVERLAP` | `50` | 分块重叠长度 |
@@ -501,6 +503,7 @@ evaluator.save_results(results)
 - [LangGraph](https://langchain-ai.github.io/langgraph/) — 客服问答状态图与 Function Calling 工具循环
 - [langgraph-checkpoint-postgres](https://pypi.org/project/langgraph-checkpoint-postgres/) — Postgres Checkpointer 多轮会话
 - [Milvus](https://milvus.io/) / [Milvus Lite](https://milvus.io/docs/milvus_lite.md) — 向量数据库（经 langchain-milvus）
+- [Docling](https://github.com/docling-project/docling) — PDF/DOCX 等版面感知文档解析
 - [sentence-transformers](https://www.sbert.net/) — 本地文本 Embedding
 - [rank-bm25](https://github.com/dorianbrown/rank_bm25) + [jieba](https://github.com/fxsjy/jieba) — BM25 关键词检索与中文分词
 - [MCP SDK](https://github.com/modelcontextprotocol/python-sdk) — Model Context Protocol 服务接口

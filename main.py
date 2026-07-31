@@ -6,10 +6,7 @@ from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 
 import config
-from src.data_loader import ConversationLoader
-from src.document_loader import load_raw_documents
 from src.evaluator import Evaluator
-from src.faq_generator import FAQGenerator
 from src.rag_agent import create_rag_agent
 from src.vector_store import KnowledgeBaseManager
 
@@ -17,7 +14,7 @@ load_dotenv()
 
 
 def setup_agent():
-    """加载对话/文档 → 生成 FAQ → 构建知识库 → 返回 (llm, agent)。"""
+    """初始化 LLM + 空知识库 Agent（文档导入/入库由 Gradio 负责）。"""
     print("=" * 60)
     print("🤖 AI客服知识库系统 v1.0")
     print("=" * 60)
@@ -31,42 +28,11 @@ def setup_agent():
         temperature=0,
     )
 
-    print("\n📂 加载历史对话...")
-    loader = ConversationLoader()
-    conversations = loader.load_conversations()
-    print(f"✅ 加载 {len(conversations)} 条对话")
-
-    print("\n🔄 从对话中生成FAQ...")
-    faq_gen = FAQGenerator(llm)
-
-    all_faqs = faq_gen.extract_qa_from_conversations(conversations)
-
-    if all_faqs:
-        unique_faqs = faq_gen.deduplicate_faqs(all_faqs)
-        print(f"✅ 生成 {len(unique_faqs)} 条FAQ (去重前: {len(all_faqs)})")
-
-        faq_gen.export_faqs(unique_faqs, format="csv")
-        faq_gen.export_faqs(unique_faqs, format="json")
-    else:
-        print("⚠️ 没有生成FAQ，请检查对话数据")
-        unique_faqs = []
-
-    print("\n📄 解析原始文档 (docx/pdf/excel/json)...")
-    raw_docs = load_raw_documents()
-    print(f"✅ 共解析 {len(raw_docs)} 个文档单元")
-
-    print("\n📚 构建知识库...")
+    print("\n📚 初始化空知识库连接...")
     kb = KnowledgeBaseManager()
+    print(f"✅ 向量库就绪: {kb.collection_name}")
 
-    if unique_faqs:
-        faq_dicts = [faq.model_dump() for faq in unique_faqs]
-        # kb.reset_collection()
-        kb.add_faqs(faq_dicts)
-
-    if raw_docs:
-        kb.add_documents(raw_docs)
-
-    print("\n🚀 启动RAG Agent（已启用多查询检索）...")
+    print("\n🚀 启动 RAG Agent...")
     agent = create_rag_agent(llm, kb)
     return llm, agent
 
@@ -93,6 +59,7 @@ def run_evaluation(agent, test_file: Path) -> None:
 def run_chat(agent) -> None:
     """交互式问答（同一进程内共用一个 thread_id，支持多轮续聊）。"""
     print("\n💬 测试问答 (输入 'exit' 退出，输入 'new' 开启新对话)")
+    print("提示: 请先通过 Gradio 导入文档并构建知识库，否则检索可能无结果。")
     thread_id = agent.new_thread_id()
     print(f"🧵 thread_id={thread_id}")
     while True:

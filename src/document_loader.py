@@ -1,17 +1,27 @@
-"""文档加载与按扩展名分发（仿 RAGFlow rag/app/naive.py 的 chunk 分发）。"""
+"""文档加载与按扩展名分发。"""
 
 import re
+import shutil
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
 
 from langchain_core.documents import Document
 
-from src.parsers import DocxParser, ExcelParser, JsonParser, PlainParser
+from src.parsers import DoclingParser, ExcelParser, JsonParser
 from src.utils import sanitize_text
 
 SUPPORTED_SUFFIXES = {
     ".docx",
     ".pdf",
+    ".pptx",
+    ".html",
+    ".htm",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".tif",
+    ".tiff",
     ".xlsx",
     ".xls",
     ".csv",
@@ -20,6 +30,20 @@ SUPPORTED_SUFFIXES = {
     ".txt",
     ".md",
     ".markdown",
+}
+
+_DOCLING_SUFFIXES = {
+    ".pdf",
+    ".docx",
+    ".pptx",
+    ".html",
+    ".htm",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".tif",
+    ".tiff",
 }
 
 
@@ -84,25 +108,25 @@ def parse_file(
     chunk_token_num: int = 512,
 ) -> List[Document]:
     """
-    按扩展名选择 parser（对齐 naive.chunk 的分支逻辑）。
+    按扩展名选择 parser。
 
-    - docx / pdf / txt / md：合并为整篇 Document，交由向量库侧分块
-    - excel / csv / json：已按行或结构切块，标记 pre_chunked=True
+    - pdf/docx/pptx/html/图片：Docling → Markdown，交由向量库侧分块
+    - excel/csv/json：按行或结构切块，标记 pre_chunked=True
+    - txt/md：直接读取
     """
     path = Path(path)
     filename = path.name
+    suffix = path.suffix.lower()
+
+    if suffix in _DOCLING_SUFFIXES:
+        if binary is not None:
+            sections, _ = DoclingParser()(binary, suffix=suffix)
+        else:
+            sections, _ = DoclingParser()(path)
+        file_type = suffix.lstrip(".") or "document"
+        return _sections_to_document(path, file_type, sections, category=category)
+
     data = binary if binary is not None else path.read_bytes()
-
-    if re.search(r"\.docx$", filename, re.IGNORECASE):
-        secs, tbls = DocxParser()(data)
-        parts: List[str] = [t for t, _ in secs if t]
-        for table_lines in tbls:
-            parts.extend(table_lines)
-        return _sections_to_document(path, "docx", parts, category=category)
-
-    if re.search(r"\.pdf$", filename, re.IGNORECASE):
-        sections, _ = PlainParser()(data)
-        return _sections_to_document(path, "pdf", sections, category=category)
 
     if re.search(r"\.(csv|xlsx?)$", filename, re.IGNORECASE):
         rows = ExcelParser()(data)
@@ -131,7 +155,7 @@ def parse_file(
 
     raise NotImplementedError(
         f"file type not supported yet: {filename} "
-        f"(supported: docx, pdf, xlsx/xls/csv, json/jsonl, txt/md)"
+        f"(supported: {', '.join(sorted(SUPPORTED_SUFFIXES))})"
     )
 
 
@@ -168,16 +192,50 @@ def load_directory(
     return docs
 
 
+def save_uploads(
+    files: Iterable[Union[Path, str]],
+    dest_dir: Optional[Path] = None,
+) -> List[Path]:
+    """将上传文件复制到 uploads 目录（同名覆盖），返回保存路径列表。"""
+    import config
+
+    dest = Path(dest_dir or config.UPLOADS_DIR)
+    dest.mkdir(parents=True, exist_ok=True)
+    saved: List[Path] = []
+    for item in files:
+        src = Path(item)
+        if not src.is_file():
+            continue
+        target = dest / src.name
+        shutil.copy2(src, target)
+        saved.append(target)
+    return saved
+
+
+def list_upload_files(dest_dir: Optional[Path] = None) -> List[Path]:
+    """列出 uploads 目录中已导入的支持格式文件。"""
+    import config
+
+    dest = Path(dest_dir or config.UPLOADS_DIR)
+    if not dest.is_dir():
+        return []
+    return sorted(
+        p
+        for p in dest.iterdir()
+        if p.is_file() and p.suffix.lower() in SUPPORTED_SUFFIXES
+    )
+
+
 def load_raw_documents(
     directories: Optional[Iterable[Union[Path, str]]] = None,
 ) -> List[Document]:
-    """加载政策/产品等原始文档目录。"""
+    """加载政策/产品/用户上传等原始文档目录。"""
     import config
 
     dirs = (
         list(directories)
         if directories is not None
-        else [config.POLICIES_DIR, config.PRODUCTS_DIR]
+        else [config.POLICIES_DIR, config.PRODUCTS_DIR, config.UPLOADS_DIR]
     )
     all_docs: List[Document] = []
     for d in dirs:

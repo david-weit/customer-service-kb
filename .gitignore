@@ -1,6 +1,8 @@
 /chroma_db/
 /milvus_data/*
 !/milvus_data/.gitkeep
+/data/raw/uploads/*
+!/data/raw/uploads/.gitkeep
 /.venv/
 /src/__pycache__/
 **/__pycache__/

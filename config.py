@@ -14,6 +14,7 @@ CONVERSATIONS_DIR = DATA_DIR / "conversations"
 
 POLICIES_DIR = RAW_DIR / "policies"
 PRODUCTS_DIR = RAW_DIR / "products"
+UPLOADS_DIR = RAW_DIR / "uploads"
 FAQ_MANUAL_PATH = RAW_DIR / "faq_manual.csv"
 CHUNKED_DOCS_DIR = PROCESSED_DIR / "chunked_docs"
 RAW_LOGS_PATH = CONVERSATIONS_DIR / "raw_logs.csv"
