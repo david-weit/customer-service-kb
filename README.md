@@ -29,7 +29,7 @@ Gradio：导入文档（落盘 uploads）
 构建知识库（全量 reset + Docling/Excel/JSON 解析）
     │
     ▼
-KnowledgeBaseManager (Milvus Lite + BM25 混合检索)
+KnowledgeBaseManager (Milvus Standalone + BM25 混合检索)
     │
     ▼
 RAGAgent (LangGraph + Function Calling + Checkpointer)
@@ -97,12 +97,14 @@ customer-service-kb/
 │   └── requirements.txt    # MCP 额外依赖
 ├── logs/                   # 运行日志（自动生成）
 ├── docker-compose.yml      # Docker 编排（含 app / mcp 服务）
-└── milvus_data/            # Milvus Lite 持久化目录（运行后自动生成）
 ```
+
+> 向量库使用 docker-env 中的 Milvus Standalone（`http://127.0.0.1:19530`），不再使用本地 `milvus_data/` Lite 文件。
 
 ## 环境要求
 
 - Python 3.10+
+- Milvus Standalone（docker-env：`docker compose -f docker-compose.milvus.yml up -d`）
 - 可访问 DeepSeek API（或兼容 OpenAI 接口的其他模型服务）
 
 ## 快速开始
@@ -256,7 +258,7 @@ rag_service.py → RAGAgent + KnowledgeBaseManager（复用 src/）
 
 ### 本地启动
 
-先确保主项目依赖与知识库已就绪（`milvus_data/` 中有 FAQ 数据，`.env` 已配置 `DEEPSEEK_API_KEY`）：
+先确保 Milvus Standalone 已启动（见 docker-env `docker-compose.milvus.yml`）、主项目依赖与知识库已就绪，且 `.env` 已配置 `DEEPSEEK_API_KEY`：
 
 ```bash
 # 安装 MCP 额外依赖
@@ -294,7 +296,7 @@ docker compose --profile mcp up
 | `app` | 运行 `python main.py` 交互问答 |
 | `mcp` | 运行 `python server.py` MCP 服务 |
 
-两个服务共享 `data/`、`milvus_data/`、`logs/` 卷与 `.env` 配置。
+两个服务共享 `data/`、`logs/` 卷与 `.env` 配置；通过 `host.docker.internal:19530` 连接宿主机上的 Milvus Standalone。
 
 ### 容器启动自动补依赖
 
@@ -426,7 +428,7 @@ history = agent.get_history(thread_id)  # 完整历史（不受窗口裁剪）
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `MILVUS_URI` | `milvus_data/kb.db`（可用环境变量覆盖） | Milvus 连接 URI；本地文件走 Lite，`http://host:19530` 走 Standalone |
+| `MILVUS_URI` | `http://127.0.0.1:19530`（可用环境变量覆盖） | Milvus Standalone gRPC 地址；docker-env 同网内用 `http://milvus-standalone:19530` |
 | `COLLECTION_NAME` | `customer_service_kb` | Milvus collection 名称 |
 | `UPLOADS_DIR` | `data/raw/uploads` | Gradio 导入落盘目录 |
 | `EMBEDDING_MODEL_LOCAL` | `sentence-transformers/all-MiniLM-L6-v2` | 本地 Embedding 模型 |
@@ -502,7 +504,7 @@ evaluator.save_results(results)
 - [LangChain](https://python.langchain.com/) — LLM 编排与结构化输出
 - [LangGraph](https://langchain-ai.github.io/langgraph/) — 客服问答状态图与 Function Calling 工具循环
 - [langgraph-checkpoint-postgres](https://pypi.org/project/langgraph-checkpoint-postgres/) — Postgres Checkpointer 多轮会话
-- [Milvus](https://milvus.io/) / [Milvus Lite](https://milvus.io/docs/milvus_lite.md) — 向量数据库（经 langchain-milvus）
+- [Milvus](https://milvus.io/) — 向量数据库 Standalone（经 langchain-milvus）
 - [Docling](https://github.com/docling-project/docling) — PDF/DOCX 等版面感知文档解析
 - [sentence-transformers](https://www.sbert.net/) — 本地文本 Embedding
 - [rank-bm25](https://github.com/dorianbrown/rank_bm25) + [jieba](https://github.com/fxsjy/jieba) — BM25 关键词检索与中文分词

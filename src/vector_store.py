@@ -32,7 +32,6 @@ class KnowledgeBaseManager:
         self.vectorstore = None
         self.hybrid_retriever = None
         self.documents: List[Document] = []
-        config.MILVUS_DIR.mkdir(parents=True, exist_ok=True)
         self._load_or_create()
 
     def create_hybrid_retriever(
@@ -56,7 +55,7 @@ class KnowledgeBaseManager:
         print("✅ 混合检索器创建完成")
 
     def _close_vectorstore(self) -> None:
-        """关闭现有连接，释放 Milvus Lite 文件锁。"""
+        """关闭现有连接。"""
         if self.vectorstore is None:
             return
         try:

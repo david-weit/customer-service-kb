@@ -4,9 +4,12 @@ services:
     stdin_open: true
     tty: true
     env_file: .env
+    environment:
+      - MILVUS_URI=http://host.docker.internal:19530
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/app/data
-      - ./milvus_data:/app/milvus_data
       - ./logs:/app/logs
       - hf_cache:/app/.cache/huggingface
     command: python main.py
@@ -14,9 +17,12 @@ services:
   mcp:
     build: .
     env_file: .env
+    environment:
+      - MILVUS_URI=http://host.docker.internal:19530
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/app/data
-      - ./milvus_data:/app/milvus_data
       - ./logs:/app/logs
       - hf_cache:/app/.cache/huggingface
     working_dir: /app/mcp-server
